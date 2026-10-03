@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Python & Environments
+__pycache__/
+backend/__pycache__/
+*/__pycache__/
+*.py[cod]
+.venv/
+venv/
+ENV/
+
+# Datasets & Hackathon Info (Excluded)
+data/
+hackathon_information/
+testing_dataset/
+
+# Environment & Secrets
+.env
+.env.local
+*.env
+
+# Build outputs & caches
+frontend/dist/
+dist/
+build/
+.cache/
+.pytest_cache/
+
+# OS files
+.DS_Store
+*/.DS_Store
+
+# Temp files
+Webiste*
+Website*
+
+# Local databases
+*.db
+
+# Local scratch / debugging files
+scratch/
+
+# Local scratch / debugging files
+scratch/
