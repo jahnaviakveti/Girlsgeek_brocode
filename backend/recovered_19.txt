@@ -1,0 +1,229 @@
+Created At: 2026-10-04T17:19:05+05:30
+Completed At: 2026-10-04T17:19:05+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2107
+Total Bytes: 77770
+Showing lines 1690 to 1910
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1690:     summary="Create Career Execution",
+1691:     description="Initializes persistent tracking for a career action."
+1692: )
+1693: def create_career_execution(
+1694:     payload: CreateCareerExecutionRequest,
+1695:     db: Session = Depends(get_db)
+1696: ) -> CareerExecution:
+1697:     try:
+1698:         return _career_execution_service.create_execution(
+1699:             candidate_id=payload.candidate_id,
+1700:             action_id=payload.action_id,
+1701:             target_id=payload.target_id,
+1702:             notes=payload.notes,
+1703:             db=db,
+1704:         )
+1705:     except PermissionError as exc:
+1706:         raise HTTPException(status_code=403, detail=str(exc))
+1707:     except ValueError as exc:
+1708:         raise HTTPException(status_code=404, detail=str(exc))
+1709: 
+1710: 
+1711: @router.get(
+1712:     "/career-executions/{candidate_id}",
+1713:     response_model=List[CareerExecution],
+1714:     summary="List Career Executions",
+1715:     description="Returns all execution records for a candidate, optionally filtered by target_id."
+1716: )
+1717: def list_career_executions(
+1718:     candidate_id: str,
+1719:     target_id: Optional[str] = None,
+1720:     db: Session = Depends(get_db)
+1721: ) -> List[CareerExecution]:
+1722:     return _career_execution_service.list_executions_for_candidate(
+1723:         candidate_id=candidate_id,
+1724:         target_id=target_id,
+1725:         db=db,
+1726:     )
+1727: 
+1728: 
+1729: @router.get(
+1730:     "/career-executions/{candidate_id}/{execution_id}",
+1731:     response_model=CareerExecution,
+1732:     summary="Get Career Execution Detail",
+1733:     description="Returns a single execution record with strict tenant ownership verification."
+1734: )
+1735: def get_career_execution_detail(
+1736:     candidate_id: str,
+1737:     execution_id: str,
+1738:     db: Session = Depends(get_db)
+1739: ) -> CareerExecution:
+1740:     try:
+1741:         return _career_execution_service.get_execution(
+1742:             candidate_id=candidate_id,
+1743:             execution_id=execution_id,
+1744:             db=db,
+1745:         )
+1746:     except PermissionError as exc:
+1747:         raise HTTPException(status_code=403, detail=str(exc))
+1748:     except ValueError as exc:
+1749:         raise HTTPException(status_code=404, detail=str(exc))
+1750: 
+1751: 
+1752: @router.post(
+1753:     "/career-executions/{execution_id}/start",
+1754:     response_model=CareerExecution,
+1755:     summary="Start Career Execution",
+1756:     description="Transitions an execution from NOT_STARTED to IN_PROGRESS."
+1757: )
+1758: def start_career_execution(
+1759:     execution_id: str,
+1760:     payload: StartExecutionRequest,
+1761:     db: Session = Depends(get_db)
+1762: ) -> CareerExecution:
+1763:     try:
+1764:         return _career_execution_service.start_execution(
+1765:             candidate_id=payload.candidate_id,
+1766:             execution_id=execution_id,
+1767:             db=db,
+1768:         )
+1769:     except PermissionError as exc:
+1770:         raise HTTPException(status_code=403, detail=str(exc))
+1771:     except ValueError as exc:
+1772:         raise HTTPException(status_code=400, detail=str(exc))
+1773: 
+1774: 
+1775: @router.post(
+1776:     "/career-executions/{execution_id}/progress",
+1777:     response_model=CareerExecution,
+1778:     summary="Update Career Execution Progress",
+1779:     description="Updates progress percentage and notes. Never grants skills or verified evidence directly."
+1780: )
+1781: def update_career_execution_progress(
+1782:     execution_id: str,
+1783:     payload: UpdateExecutionProgressRequest,
+1784:     db: Session = Depends(get_db)
+1785: ) -> CareerExecution:
+1786:     try:
+1787:         return _career_execution_service.update_progress(
+1788:             candidate_id=payload.candidate_id,
+1789:             execution_id=execution_id,
+1790:             progress_percent=payload.progress_percent,
+1791:             notes=payload.notes,
+1792:             next_step=payload.next_step,
+1793:             db=db,
+1794:         )
+1795:     except PermissionError as exc:
+1796:         raise HTTPException(status_code=403, detail=str(exc))
+1797:     except ValueError as exc:
+1798:         raise HTTPException(status_code=400, detail=str(exc))
+1799: 
+1800: 
+1801: @router.post(
+1802:     "/career-executions/{execution_id}/submit-artifact",
+1803:     response_model=CareerExecution,
+1804:     summary="Submit Execution Artifact",
+1805:     description="Attaches a genuine artifact reference to the execution record."
+1806: )
+1807: def submit_career_execution_artifact(
+1808:     execution_id: str,
+1809:     payload: SubmitArtifactRequest,
+1810:     db: Session = Depends(get_db)
+1811: ) -> CareerExecution:
+1812:     try:
+1813:         return _career_execution_service.submit_artifact(
+1814:             candidate_id=payload.candidate_id,
+1815:             execution_id=execution_id,
+1816:             name=payload.name,
+1817:             artifact_type=payload.artifact_type,
+1818:             url_or_path=payload.url_or_path,
+1819:             description=payload.description,
+1820:             technologies=payload.technologies,
+1821:             db=db,
+1822:         )
+1823:     except PermissionError as exc:
+1824:         raise HTTPException(status_code=403, detail=str(exc))
+1825:     except ValueError as exc:
+1826:         raise HTTPException(status_code=400, detail=str(exc))
+1827: 
+1828: 
+1829: @router.post(
+1830:     "/career-executions/{execution_id}/complete",
+1831:     response_model=CareerExecution,
+1832:     summary="Complete Career Execution (Self-Reported)",
+1833:     description="Marks execution as SELF_REPORTED_COMPLETE. Does NOT alter Evidence Vault or Twin."
+1834: )
+1835: def complete_career_execution_self_reported(
+1836:     execution_id: str,
+1837:     payload: CompleteExecutionRequest,
+1838:     db: Session = Depends(get_db)
+1839: ) -> CareerExecution:
+1840:     try:
+1841:         return _career_execution_service.complete_self_reported(
+1842:             candidate_id=payload.candidate_id,
+1843:             execution_id=execution_id,
+1844:             notes=payload.notes,
+1845:             db=db,
+1846:         )
+1847:     except PermissionError as exc:
+1848:         raise HTTPException(status_code=403, detail=str(exc))
+1849:     except ValueError as exc:
+1850:         raise HTTPException(status_code=400, detail=str(exc))
+1851: 
+1852: 
+1853: @router.post(
+1854:     "/career-executions/{execution_id}/block",
+1855:     response_model=CareerExecution,
+1856:     summary="Report Execution Blocker",
+1857:     description="Flags execution as BLOCKED with reason and next steps."
+1858: )
+1859: def block_career_execution(
+1860:     execution_id: str,
+1861:     payload: BlockExecutionRequest,
+1862:     db: Session = Depends(get_db)
+1863: ) -> CareerExecution:
+1864:     try:
+1865:         return _career_execution_service.report_blocker(
+1866:             candidate_id=payload.candidate_id,
+1867:             execution_id=execution_id,
+1868:             blocker_reason=payload.blocker_reason,
+1869:             next_step=payload.next_step,
+1870:             db=db,
+1871:         )
+1872:     except PermissionError as exc:
+1873:         raise HTTPException(status_code=403, detail=str(exc))
+1874:     except ValueError as exc:
+1875:         raise HTTPException(status_code=400, detail=str(exc))
+1876: 
+1877: 
+1878: @router.post(
+1879:     "/career-executions/{execution_id}/verify-evidence",
+1880:     response_model=EvidenceVerificationResult,
+1881:     summary="Verify Execution Evidence",
+1882:     description="Validates submitted artifact claims and attaches verified items to Evidence Vault."
+1883: )
+1884: def verify_career_execution_evidence(
+1885:     execution_id: str,
+1886:     payload: VerifyEvidenceRequest,
+1887:     db: Session = Depends(get_db)
+1888: ) -> EvidenceVerificationResult:
+1889:     try:
+1890:         twin = _get_or_load_twin(payload.candidate_id, db)
+1891:         vault = _get_or_load_vault(payload.candidate_id, db)
+1892:         return _career_execution_service.verify_evidence(
+1893:             candidate_id=payload.candidate_id,
+1894:             execution_id=execution_id,
+1895:             evidence_claims=payload.evidence_claims,
+1896:             artifact_id=payload.artifact_id,
+1897:             db=db,
+1898:             twin=twin,
+1899:             vault=vault,
+1900:         )
+1901:     except PermissionError as exc:
+1902:         raise HTTPException(status_code=403, detail=str(exc))
+1903:     except ValueError as exc:
+1904:         raise HTTPException(status_code=400, detail=str(exc))
+1905: 
+1906: 
+1907: # =============================================================================
+1908: # PHASE 9: CAREER SHOWCASE & PRODUCTION RELEASE ENDPOINTS
+1909: # =============================================================================
+1910: 
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

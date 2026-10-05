@@ -1,0 +1,34 @@
+Created At: 2026-10-04T17:19:24+05:30
+Completed At: 2026-10-04T17:19:24+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2143
+Total Bytes: 79500
+Showing lines 1905 to 1930
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1905: ) -> EvidenceVerificationResult:
+1906:     try:
+1907:         twin = _get_or_load_twin(payload.candidate_id, db)
+1908:         vault = _get_or_load_vault(payload.candidate_id, db)
+1909:         result = _career_execution_service.verify_evidence(
+1910:             candidate_id=payload.candidate_id,
+1911:             execution_id=execution_id,
+1912:             evidence_claims=payload.evidence_claims,
+1913:             artifact_id=payload.artifact_id,
+1914:             db=db,
+1915:             twin=twin,
+1916:             vault=vault,
+1917:         )
+1918:         if result.verified:
+1919:             try:
+1920:                 execution = _career_execution_service.get_execution(payload.candidate_id, execution_id, db=db)
+1921:                 if execution and execution.target_id:
+1922:                     target = _get_or_load_target(execution.target_id, db)
+1923:                     if target and twin and vault:
+1924:                         _career_intelligence_service.refresh_target_intelligence(
+1925:                             target=target,
+1926:                             twin=twin,
+1927:                             vault=vault,
+1928:                             db=db,
+1929:                         )
+1930:             except Exception:
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

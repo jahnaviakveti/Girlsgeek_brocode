@@ -1,0 +1,69 @@
+Created At: 2026-10-04T17:11:01+05:30
+Completed At: 2026-10-04T17:11:01+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2107
+Total Bytes: 77770
+Showing lines 1875 to 1935
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1875:         raise HTTPException(status_code=400, detail=str(exc))
+1876: 
+1877: 
+1878: @router.post(
+1879:     "/career-executions/{execution_id}/verify-evidence",
+1880:     response_model=EvidenceVerificationResult,
+1881:     summary="Verify Execution Evidence",
+1882:     description="Validates submitted artifact claims and attaches verified items to Evidence Vault."
+1883: )
+1884: def verify_career_execution_evidence(
+1885:     execution_id: str,
+1886:     payload: VerifyEvidenceRequest,
+1887:     db: Session = Depends(get_db)
+1888: ) -> EvidenceVerificationResult:
+1889:     try:
+1890:         twin = _get_or_load_twin(payload.candidate_id, db)
+1891:         vault = _get_or_load_vault(payload.candidate_id, db)
+1892:         return _career_execution_service.verify_evidence(
+1893:             candidate_id=payload.candidate_id,
+1894:             execution_id=execution_id,
+1895:             evidence_claims=payload.evidence_claims,
+1896:             artifact_id=payload.artifact_id,
+1897:             db=db,
+1898:             twin=twin,
+1899:             vault=vault,
+1900:         )
+1901:     except PermissionError as exc:
+1902:         raise HTTPException(status_code=403, detail=str(exc))
+1903:     except ValueError as exc:
+1904:         raise HTTPException(status_code=400, detail=str(exc))
+1905: 
+1906: 
+1907: # =============================================================================
+1908: # PHASE 9: CAREER SHOWCASE & PRODUCTION RELEASE ENDPOINTS
+1909: # =============================================================================
+1910: 
+1911: @router.get(
+1912:     "/showcase/public/{share_token}",
+1913:     response_model=PublicCareerShowcase,
+1914:     summary="Get Public/Shareable Career Showcase",
+1915:     description="Returns sanitized, verified profile view. Strictly requires active shareable token."
+1916: )
+1917: def get_public_career_showcase(
+1918:     share_token: str,
+1919:     db: Session = Depends(get_db)
+1920: ) -> PublicCareerShowcase:
+1921:     try:
+1922:         return _showcase_service.get_public_showcase_by_token(share_token=share_token, db=db)
+1923:     except PermissionError as exc:
+1924:         raise HTTPException(status_code=404, detail=str(exc))
+1925:     except ValueError as exc:
+1926:         raise HTTPException(status_code=404, detail=str(exc))
+1927: 
+1928: 
+1929: @router.get(
+1930:     "/showcase/{candidate_id}/export",
+1931:     summary="Export Verified Career Showcase",
+1932:     description="Produces structured verified export of the candidate's career showcase."
+1933: )
+1934: def export_career_showcase(
+1935:     candidate_id: str,
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

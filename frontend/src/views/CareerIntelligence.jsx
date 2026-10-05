@@ -1,5 +1,41 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { coachApi } from '../services/api';
+import './CareerIntelligence.css';
+
+const CollapsibleSection = ({ title, count, children, defaultOpen = false, icon = '' }) => {
+  const [isOpen, setIsOpen] = React.useState(defaultOpen);
+  return (
+    <div className="ci-collapse-panel">
+      <div className="ci-collapse-header" onClick={() => setIsOpen(!isOpen)}>
+        <div style={{display: 'flex', alignItems: 'center', gap: '0.75rem'}}>
+          <span className="col-icon" style={{background: 'none', width: 'auto', fontSize: '1.25rem'}}>{icon}</span>
+          <span className="ci-collapse-title">{title}</span>
+        </div>
+        <div className="ci-collapse-right">
+          <span className="ci-collapse-count">{count}</span>
+          <span className="ci-collapse-icon">{isOpen ? '▲' : '▼'}</span>
+        </div>
+      </div>
+      {isOpen && <div className="ci-collapse-content">{children}</div>}
+    </div>
+  );
+};
+
+export function formatCoverage(val) {
+  if (val === null || val === undefined || isNaN(val)) return '0.0%';
+  const num = Number(val);
+  const pct = (num > 0 && num <= 1.0) ? num * 100 : num;
+  return `${pct.toFixed(1)}%`;
+}
+
+export function formatCoverageDelta(val) {
+  if (val === null || val === undefined || isNaN(val)) return '0.0%';
+  const num = Number(val);
+  const pct = (Math.abs(num) > 0 && Math.abs(num) <= 1.0) ? num * 100 : num;
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
 
 export default function CareerIntelligence({ careerTwin, evidenceVault, onHandoffToResumeCoach, onNavigateToVault }) {
   const [targets, setTargets] = useState([]);
@@ -229,68 +265,60 @@ export default function CareerIntelligence({ careerTwin, evidenceVault, onHandof
     return a.status === actionFilter;
   });
 
+
+  // Compute Top Gaps for Next Steps
+  let topGaps = [];
+  if (intelligence) {
+    const allGaps = [
+      ...(intelligence.visibility_gaps || []).map(g => ({ ...g, gapType: 'VISIBILITY' })),
+      ...(intelligence.experience_gaps || []).map(g => ({ ...g, gapType: 'EXPERIENCE' }))
+    ];
+    const prioValue = { 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1 };
+    allGaps.sort((a, b) => (prioValue[b.priority] || 0) - (prioValue[a.priority] || 0));
+    topGaps = allGaps.slice(0, 3);
+  }
+
   return (
-    <div className="career-intelligence-view">
-      {/* Top Header & Target Selector */}
-      <div className="ci-header-panel">
-        <div className="ci-header-left">
-          <div className="ci-badge">🧭 Phase 6 • Evidence-Grounded Career Intelligence</div>
-          <h2 className="ci-title">Career Intelligence & Gap Planning</h2>
-          <p className="ci-subtitle">
-            Diagnostic career-development and resume-evidence gap analysis. Answers: <em>"What should I work on next to become better aligned with target roles?"</em>
-          </p>
+    <div className="ci-dashboard">
+      {/* 1. Compact Header */}
+      <div className="ci-dash-header">
+        <div className="ci-dash-header-title">
+          <h2>Career Intelligence</h2>
+          <p>Your evidence-based roadmap for becoming a stronger candidate.</p>
         </div>
-
-        <div className="ci-header-actions">
+        <div className="ci-dash-header-actions">
           {targets.length > 0 && (
-            <div className="target-select-wrap">
-              <label htmlFor="target-select" className="target-select-label">Active Target:</label>
-              <select
-                id="target-select"
-                className="target-dropdown"
-                value={selectedTargetId || ''}
-                onChange={(e) => setSelectedTargetId(e.target.value)}
-              >
-                {targets.map(t => (
-                  <option key={t.target_id} value={t.target_id}>
-                    {t.target_role} {t.target_company ? `(${t.target_company})` : ''} [{t.status}]
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              className="ci-compact-select"
+              value={selectedTargetId || ''}
+              onChange={(e) => setSelectedTargetId(e.target.value)}
+            >
+              {targets.map(t => (
+                <option key={t.target_id} value={t.target_id}>
+                  {t.target_role} {t.target_company ? `(${t.target_company})` : ''}
+                </option>
+              ))}
+            </select>
           )}
-
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn-secondary btn-sm"
             onClick={() => setShowCreateModal(true)}
           >
             + New Career Target
           </button>
-
-          {selectedTarget && (
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleRefresh}
-              disabled={refreshing || loading}
-            >
-              {refreshing ? 'Refreshing...' : '🔄 Refresh Intelligence'}
-            </button>
-          )}
         </div>
       </div>
 
       {/* Messages */}
       {error && (
-        <div className="alert-banner alert-error" style={{ marginBottom: '1.25rem' }}>
+        <div className="alert-banner alert-error" style={{ marginBottom: '0' }}>
           <span>⚠️ {error}</span>
           <button type="button" className="close-btn" onClick={() => setError(null)}>×</button>
         </div>
       )}
-
       {successMsg && (
-        <div className="alert-banner alert-success" style={{ marginBottom: '1.25rem' }}>
+        <div className="alert-banner alert-success" style={{ marginBottom: '0' }}>
           <span>✓ {successMsg}</span>
           <button type="button" className="close-btn" onClick={() => setSuccessMsg(null)}>×</button>
         </div>
@@ -304,12 +332,100 @@ export default function CareerIntelligence({ careerTwin, evidenceVault, onHandof
         </div>
       )}
 
-      {/* Empty State when no targets exist */}
+            {showCreateModal ? (
+        <div className="ci-create-target-card">
+          <div className="ci-create-left">
+            <div className="ci-create-icon">🎯</div>
+            <h3 className="ci-create-title">{targets.length === 0 ? "No Career Target Defined" : "Create your career target"}</h3>
+            <p className="ci-create-desc">
+              Set a target role and Vettora will analyze your verified evidence against its requirements.
+            </p>
+            <ul className="ci-create-benefits">
+              <li>✓ Evidence alignment</li>
+              <li>✓ Gap analysis</li>
+              <li>✓ Career action planning</li>
+            </ul>
+          </div>
+          <div className="ci-create-right">
+            <div className="ci-create-right-header">
+              <h4>Create New Career Target</h4>
+            </div>
+            <form onSubmit={handleCreateTarget} className="ci-create-form">
+              <div className="form-group">
+                <label className="form-label" htmlFor="role-input">Target Role Title *</label>
+                <input
+                  id="role-input"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Senior Backend Engineer"
+                  value={targetRoleInput}
+                  onChange={e => setTargetRoleInput(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="company-input">Target Company (Optional)</label>
+                <input
+                  id="company-input"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Stripe, OpenAI, Datadog"
+                  value={targetCompanyInput}
+                  onChange={e => setTargetCompanyInput(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="jd-text-input">Job Description / Requirements</label>
+                <textarea
+                  id="jd-text-input"
+                  className="form-textarea"
+                  rows={6}
+                  placeholder={`Paste target job requirements here, for example:
+
+Requirements:
+- Python microservices
+- PostgreSQL database
+- Kubernetes cluster orchestration
+
+Preferred:
+- Rust experience`}
+                  value={targetJdTextInput}
+                  onChange={e => setTargetJdTextInput(e.target.value)}
+                />
+                <span className="form-hint">
+                  Requirements are deterministically analyzed using the existing Job Fit engine.
+                </span>
+              </div>
+
+              <div className="ci-create-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowCreateModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={createSubmitting || !targetRoleInput.trim()}
+                >
+                  {createSubmitting ? 'Creating...' : 'Create Career Target'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <>
+{/* Empty State when no targets exist */}
       {!loading && targets.length === 0 && (
         <div className="coach-empty-state">
           <div className="empty-icon">🎯</div>
           <h3>No Career Targets Defined</h3>
-          <p>Set a career target (e.g. "Senior Backend Engineer" or "DevOps Architect") to diagnose your strengths, resume visibility gaps, and experience gaps.</p>
+          <p>Set a career target (e.g. "Senior Backend Engineer") to diagnose your strengths and gaps.</p>
           <button
             type="button"
             className="btn btn-primary"
@@ -324,118 +440,131 @@ export default function CareerIntelligence({ careerTwin, evidenceVault, onHandof
       {/* Intelligence Dashboard */}
       {!loading && intelligence && (
         <>
-          {/* Diagnostic Evidence Coverage Banner */}
-          <div className="ci-coverage-card">
-            <div className="coverage-card-main">
-              <div className="coverage-metric-col">
-                <span className="coverage-metric-label">DIAGNOSTIC EVIDENCE COVERAGE</span>
-                <div className="coverage-metric-val-wrap">
-                  {intelligence.progress_summary?.previous_coverage !== null && intelligence.progress_summary?.previous_coverage !== undefined ? (
-                    <div className="coverage-delta-display">
-                      <span className="coverage-val-prev">{(intelligence.progress_summary.previous_coverage * 100).toFixed(1)}%</span>
-                      <span className="coverage-arrow">→</span>
-                      <span className="coverage-val-curr">{(intelligence.evidence_coverage * 100).toFixed(1)}%</span>
-                      {intelligence.progress_summary.coverage_delta !== 0 && (
-                        <span className={`coverage-delta-tag ${intelligence.progress_summary.coverage_delta > 0 ? 'tag-positive' : 'tag-neutral'}`}>
-                          {intelligence.progress_summary.coverage_delta > 0 ? `+${(intelligence.progress_summary.coverage_delta * 100).toFixed(1)}%` : `${(intelligence.progress_summary.coverage_delta * 100).toFixed(1)}%`}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="coverage-val-curr">{(intelligence.evidence_coverage * 100).toFixed(1)}%</span>
-                  )}
-                </div>
-                <div className="coverage-guardrail-notice">
-                  🛡️ Diagnostic Evidence State — Not a hiring prediction, candidate ranking, or probability score.
-                </div>
-              </div>
-
-              {/* Requirement Counts Breakdown */}
-              <div className="coverage-breakdown-col">
-                <div className="breakdown-stat-grid">
-                  <div className="b-stat b-stat-matched">
-                    <span className="b-num">{intelligence.progress_summary?.matched_count || 0}</span>
-                    <span className="b-lbl">Matched</span>
-                  </div>
-                  <div className="b-stat b-stat-partial">
-                    <span className="b-num">{intelligence.progress_summary?.partial_count || 0}</span>
-                    <span className="b-lbl">Partial</span>
-                  </div>
-                  <div className="b-stat b-stat-missing">
-                    <span className="b-num">{intelligence.progress_summary?.missing_count || 0}</span>
-                    <span className="b-lbl">Missing</span>
-                  </div>
-                  <div className="b-stat b-stat-nv">
-                    <span className="b-num">{intelligence.progress_summary?.not_verifiable_count || 0}</span>
-                    <span className="b-lbl">Not Verifiable</span>
-                  </div>
-                </div>
-
-                <div className="gap-type-summary-row">
-                  <span className="gap-tag gap-tag-vis">
-                    Visibility Gaps: {intelligence.progress_summary?.visibility_gaps_count || 0}
-                  </span>
-                  <span className="gap-tag gap-tag-exp">
-                    Experience Gaps: {intelligence.progress_summary?.experience_gaps_count || 0}
-                  </span>
-                </div>
+          {/* 2. Unified Target + Coverage Card */}
+          <div className="ci-unified-card">
+            <div className="ci-unified-left">
+              <span className="ci-unified-label">Target Role</span>
+              <h3 className="ci-unified-role">{intelligence.target_role}</h3>
+              {intelligence.target_company && <p className="ci-unified-company">{intelligence.target_company}</p>}
+              <div className="ci-unified-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                >
+                  {refreshing ? 'Refreshing...' : '↻ Refresh Intelligence'}
+                </button>
               </div>
             </div>
-
-            {/* Narrative Summary */}
-            {intelligence.progress_summary?.narrative && (
-              <div className="coverage-narrative-box">
-                <span className="narrative-icon">📌</span>
-                <span className="narrative-text">{intelligence.progress_summary.narrative}</span>
+            <div className="ci-unified-right">
+              <span className="ci-unified-label">Evidence Coverage</span>
+              <h2 className="ci-unified-score">{formatCoverage(intelligence.evidence_coverage)}</h2>
+              <div className="ci-unified-progress-bg">
+                <div className="ci-unified-progress-bar" style={{ width: formatCoverage(intelligence.evidence_coverage) }}></div>
               </div>
-            )}
-
-            {/* Before / After Progress Comparison (if delta or change exists) */}
-            {intelligence.progress_summary?.improved_requirements?.length > 0 && (
-              <div className="ci-before-after-box">
-                <div className="ba-header">
-                  <span className="ba-title">📈 Target Progress Comparison</span>
-                  <span className="ba-sub">Observable requirement changes against this target:</span>
-                </div>
-                <div className="ba-grid">
-                  <div className="ba-col ba-col-improved">
-                    <span className="ba-col-title">✓ Newly Demonstrated / Improved:</span>
-                    <ul>
-                      {intelligence.progress_summary.improved_requirements.map((reqText, idx) => (
-                        <li key={idx}>{reqText}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  {intelligence.progress_summary.remaining_experience_gaps?.length > 0 && (
-                    <div className="ba-col ba-col-remaining">
-                      <span className="ba-col-title">⏳ Remaining Experience Gaps:</span>
-                      <ul>
-                        {intelligence.progress_summary.remaining_experience_gaps.map((reqText, idx) => (
-                          <li key={idx}>{reqText}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
+              <div className="ci-unified-stats">
+                <span>{intelligence.strengths?.length || 0} verified</span>
+                <span>{intelligence.visibility_gaps?.length || 0} visibility gaps</span>
+                <span>{intelligence.experience_gaps?.length || 0} experience gaps</span>
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Main 4-Column Diagnostic Grid */}
-          <div className="ci-columns-grid">
-            {/* 1. Verified Strengths */}
-            <div className="ci-column ci-col-strengths">
-              <div className="ci-col-header">
-                <div className="col-title-wrap">
-                  <span className="col-icon">✓</span>
-                  <h3 className="col-title">Verified Strengths</h3>
-                </div>
-                <span className="col-count-badge">{intelligence.strengths?.length || 0}</span>
+          {/* 3. Diagnostic Summary (Compact Cards) */}
+          <div className="ci-summary-grid">
+            <div className="ci-summary-card ci-sum-card-verified">
+              <div className="ci-sum-icon">✓</div>
+              <div className="ci-sum-body">
+                <div className="ci-sum-count">{intelligence.strengths?.length || 0}</div>
+                <div className="ci-sum-label">Verified</div>
+                <div className="ci-sum-exp">Requirements with evidence</div>
               </div>
-              <p className="col-desc">Requirements supported by genuine, verified evidence in your Evidence Vault.</p>
+            </div>
+            <div className="ci-summary-card ci-sum-card-vis">
+              <div className="ci-sum-icon">✎</div>
+              <div className="ci-sum-body">
+                <div className="ci-sum-count">{intelligence.visibility_gaps?.length || 0}</div>
+                <div className="ci-sum-label">Visibility Gaps</div>
+                <div className="ci-sum-exp">Evidence exists, resume hides it</div>
+              </div>
+            </div>
+            <div className="ci-summary-card ci-sum-card-exp">
+              <div className="ci-sum-icon">⚠</div>
+              <div className="ci-sum-body">
+                <div className="ci-sum-count">{intelligence.experience_gaps?.length || 0}</div>
+                <div className="ci-sum-label">Experience Gaps</div>
+                <div className="ci-sum-exp">Genuine experience missing</div>
+              </div>
+            </div>
+            <div className="ci-summary-card ci-sum-card-nv">
+              <div className="ci-sum-icon">❓</div>
+              <div className="ci-sum-body">
+                <div className="ci-sum-count">{intelligence.not_verifiable_gaps?.length || 0}</div>
+                <div className="ci-sum-label">Not Verifiable</div>
+                <div className="ci-sum-exp">Insufficient documentation</div>
+              </div>
+            </div>
+          </div>
 
+          {/* 4. Target Progress */}
+          {intelligence.progress_summary?.improved_requirements?.length > 0 && (
+            <div className="ci-target-progress-card">
+              <h4>TARGET PROGRESS</h4>
+              <p>Observable requirement changes against this target.</p>
+              <div className="ci-progress-list">
+                {intelligence.progress_summary.improved_requirements.slice(0, 2).map((req, i) => (
+                  <div key={i} className="ci-progress-item">
+                    <span className="ci-progress-icon">✓</span>
+                    <span>{req}</span>
+                  </div>
+                ))}
+              </div>
+              {intelligence.progress_summary.improved_requirements.length > 2 && (
+                <button className="ci-view-all-btn">
+                  [ View all {intelligence.progress_summary.improved_requirements.length} changes ]
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* 5. What to work on next */}
+          {topGaps.length > 0 && (
+            <div className="ci-next-steps-section">
+              <h3>What To Work On Next</h3>
+              <div className="ci-next-steps-grid">
+                {topGaps.map(gap => (
+                  <div key={gap.gap_id} className={`ci-next-step-card ${gap.priority === 'MEDIUM' ? 'medium-prio' : ''}`}>
+                    <span className="ci-prio-badge">{gap.priority} PRIORITY</span>
+                    <h4 className="ci-req-title">{gap.requirement_text}</h4>
+                    <p className="ci-req-why">{gap.priority_rationale || gap.explanation}</p>
+                    
+                    <span className="ci-req-rec">
+                      Recommended action: {gap.gapType === 'VISIBILITY' ? 'Improve resume wording' : 'Build project / Learn skill'}
+                    </span>
+                    <div className="ci-req-action">
+                      {gap.gapType === 'VISIBILITY' ? (
+                        <button className="btn btn-sm btn-coach-action" onClick={() => handleHandoff(gap)}>
+                          ✍️ Improve in Coach
+                        </button>
+                      ) : (
+                        <button className="btn btn-sm btn-outline-action" onClick={() => handleAddActionFromGap(gap, 'BUILD_PROJECT', `Build project: ${gap.requirement_text}`)}>
+                          🏗️ View Action
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 6. All Diagnostics Below (Collapsible) */}
+          <div className="ci-detailed-diagnostics">
+            
+            <CollapsibleSection title="Verified Strengths" count={intelligence.strengths?.length || 0} icon="✓">
               <div className="ci-card-list">
-                {intelligence.strengths?.length === 0 ? (
+                {(!intelligence.strengths || intelligence.strengths.length === 0) ? (
                   <div className="ci-empty-card">No verified strengths matched for this target yet.</div>
                 ) : (
                   intelligence.strengths.map(s => (
@@ -445,18 +574,11 @@ export default function CareerIntelligence({ careerTwin, evidenceVault, onHandof
                         <span className="category-pill">{s.category}</span>
                       </div>
                       <p className="ci-item-exp">{s.explanation}</p>
-                      
-                      {/* Evidence Citations */}
                       {s.evidence_ids?.length > 0 && (
                         <div className="ci-evidence-chips">
                           <span className="ev-label">Evidence Citations:</span>
                           {s.evidence_ids.map(eid => (
-                            <button
-                              key={eid}
-                              type="button"
-                              className="ev-chip-btn"
-                              onClick={() => setSelectedEvidenceStrength(s)}
-                            >
+                            <button key={eid} type="button" className="ev-chip-btn" onClick={() => setSelectedEvidenceStrength(s)}>
                               🔍 {eid}
                             </button>
                           ))}
@@ -466,50 +588,26 @@ export default function CareerIntelligence({ careerTwin, evidenceVault, onHandof
                   ))
                 )}
               </div>
-            </div>
+            </CollapsibleSection>
 
-            {/* 2. Resume Visibility Gaps */}
-            <div className="ci-column ci-col-visibility">
-              <div className="ci-col-header">
-                <div className="col-title-wrap">
-                  <span className="col-icon">📝</span>
-                  <h3 className="col-title">Resume Visibility Gaps</h3>
-                </div>
-                <span className="col-count-badge">{intelligence.visibility_gaps?.length || 0}</span>
-              </div>
-              <p className="col-desc">
-                <strong>Evidence already exists:</strong> Verified in your Evidence Vault, but not clearly surfaced on your resume.
-              </p>
-
+            <CollapsibleSection title="Resume Visibility Gaps" count={intelligence.visibility_gaps?.length || 0} icon="📝">
               <div className="ci-card-list">
-                {intelligence.visibility_gaps?.length === 0 ? (
+                {(!intelligence.visibility_gaps || intelligence.visibility_gaps.length === 0) ? (
                   <div className="ci-empty-card">No resume visibility gaps detected for this target.</div>
                 ) : (
                   intelligence.visibility_gaps.map(gap => (
                     <div key={gap.gap_id} className="ci-item-card visibility-card">
                       <div className="ci-item-header">
                         <span className="ci-item-title">{gap.requirement_text}</span>
-                        <span className={`prio-badge prio-${gap.priority.toLowerCase()}`}>
-                          {gap.priority}
-                        </span>
+                        <span className={`prio-badge prio-${gap.priority.toLowerCase()}`}>{gap.priority}</span>
                       </div>
                       <p className="ci-item-rationale">{gap.priority_rationale}</p>
                       <p className="ci-item-exp">{gap.explanation}</p>
-
                       <div className="ci-item-actions">
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-coach-action"
-                          onClick={() => handleHandoff(gap)}
-                        >
+                        <button type="button" className="btn btn-sm btn-coach-action" onClick={() => handleHandoff(gap)}>
                           ✍️ Improve Resume in Coach
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-secondary"
-                          onClick={() => handleAddActionFromGap(gap, 'RESUME_IMPROVEMENT', `Improve resume wording for ${gap.requirement_text}`)}
-                          disabled={actionLoading}
-                        >
+                        <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleAddActionFromGap(gap, 'RESUME_IMPROVEMENT', `Improve resume wording for ${gap.requirement_text}`)}>
                           + Add to Plan
                         </button>
                       </div>
@@ -517,61 +615,31 @@ export default function CareerIntelligence({ careerTwin, evidenceVault, onHandof
                   ))
                 )}
               </div>
-            </div>
+            </CollapsibleSection>
 
-            {/* 3. Genuine Experience Gaps */}
-            <div className="ci-column ci-col-experience">
-              <div className="ci-col-header">
-                <div className="col-title-wrap">
-                  <span className="col-icon">🔨</span>
-                  <h3 className="col-title">Experience Gaps</h3>
-                </div>
-                <span className="col-count-badge">{intelligence.experience_gaps?.length || 0}</span>
-              </div>
-              <p className="col-desc">
-                <strong>Genuine experience missing:</strong> No verified evidence exists. The system will NOT fabricate claims or rewrite your resume for these.
-              </p>
-
+            <CollapsibleSection title="Experience Gaps" count={intelligence.experience_gaps?.length || 0} icon="🔨">
               <div className="ci-card-list">
-                {intelligence.experience_gaps?.length === 0 ? (
+                {(!intelligence.experience_gaps || intelligence.experience_gaps.length === 0) ? (
                   <div className="ci-empty-card">No missing experience gaps for this target.</div>
                 ) : (
                   intelligence.experience_gaps.map(gap => (
                     <div key={gap.gap_id} className="ci-item-card experience-card">
                       <div className="ci-item-header">
                         <span className="ci-item-title">{gap.requirement_text}</span>
-                        <span className={`prio-badge prio-${gap.priority.toLowerCase()}`}>
-                          {gap.priority}
-                        </span>
+                        <span className={`prio-badge prio-${gap.priority.toLowerCase()}`}>{gap.priority}</span>
                       </div>
                       <p className="ci-item-rationale">{gap.priority_rationale}</p>
                       <p className="ci-item-exp">{gap.explanation}</p>
-
                       <div className="ci-what-to-do-box">
                         <span className="wtd-label">Safe Next Actions:</span>
                         <div className="wtd-btn-group">
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-action"
-                            onClick={() => handleAddActionFromGap(gap, 'BUILD_PROJECT', `Build project: ${gap.requirement_text}`)}
-                            disabled={actionLoading}
-                          >
+                          <button type="button" className="btn btn-sm btn-outline-action" onClick={() => handleAddActionFromGap(gap, 'BUILD_PROJECT', `Build project: ${gap.requirement_text}`)}>
                             🏗️ Build Project
                           </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-action"
-                            onClick={() => handleAddActionFromGap(gap, 'LEARN_SKILL', `Learn skill: ${gap.requirement_text}`)}
-                            disabled={actionLoading}
-                          >
+                          <button type="button" className="btn btn-sm btn-outline-action" onClick={() => handleAddActionFromGap(gap, 'LEARN_SKILL', `Learn skill: ${gap.requirement_text}`)}>
                             📚 Learn Skill
                           </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-action"
-                            onClick={() => handleAddActionFromGap(gap, 'DOCUMENT_EVIDENCE', `Document genuine experience for ${gap.requirement_text}`)}
-                            disabled={actionLoading}
-                          >
+                          <button type="button" className="btn btn-sm btn-outline-action" onClick={() => handleAddActionFromGap(gap, 'DOCUMENT_EVIDENCE', `Document genuine experience for ${gap.requirement_text}`)}>
                             📄 Document Work
                           </button>
                         </div>
@@ -580,51 +648,27 @@ export default function CareerIntelligence({ careerTwin, evidenceVault, onHandof
                   ))
                 )}
               </div>
-            </div>
+            </CollapsibleSection>
 
-            {/* 4. Not Verifiable */}
-            <div className="ci-column ci-col-nv">
-              <div className="ci-col-header">
-                <div className="col-title-wrap">
-                  <span className="col-icon">❓</span>
-                  <h3 className="col-title">Not Verifiable</h3>
-                </div>
-                <span className="col-count-badge">{intelligence.not_verifiable_gaps?.length || 0}</span>
-              </div>
-              <p className="col-desc">
-                <strong>Insufficient evidence:</strong> Available documentation is inconclusive. Add artifacts to substantiate.
-              </p>
-
+            <CollapsibleSection title="Not Verifiable" count={intelligence.not_verifiable_gaps?.length || 0} icon="❓">
               <div className="ci-card-list">
-                {intelligence.not_verifiable_gaps?.length === 0 ? (
+                {(!intelligence.not_verifiable_gaps || intelligence.not_verifiable_gaps.length === 0) ? (
                   <div className="ci-empty-card">All requirements were confidently evaluated.</div>
                 ) : (
                   intelligence.not_verifiable_gaps.map(gap => (
                     <div key={gap.gap_id} className="ci-item-card nv-card">
                       <div className="ci-item-header">
                         <span className="ci-item-title">{gap.requirement_text}</span>
-                        <span className={`prio-badge prio-${gap.priority.toLowerCase()}`}>
-                          {gap.priority}
-                        </span>
+                        <span className={`prio-badge prio-${gap.priority.toLowerCase()}`}>{gap.priority}</span>
                       </div>
                       <p className="ci-item-rationale">{gap.priority_rationale}</p>
                       <p className="ci-item-exp">{gap.explanation}</p>
-
                       <div className="ci-item-actions">
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-secondary"
-                          onClick={() => handleAddActionFromGap(gap, 'DOCUMENT_EVIDENCE', `Upload supporting evidence for ${gap.requirement_text}`)}
-                          disabled={actionLoading}
-                        >
+                        <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleAddActionFromGap(gap, 'DOCUMENT_EVIDENCE', `Upload supporting evidence for ${gap.requirement_text}`)}>
                           📎 Add Evidence Action
                         </button>
                         {onNavigateToVault && (
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-action"
-                            onClick={onNavigateToVault}
-                          >
+                          <button type="button" className="btn btn-sm btn-outline-action" onClick={onNavigateToVault}>
                             🔍 Open Evidence Explorer
                           </button>
                         )}
@@ -633,10 +677,11 @@ export default function CareerIntelligence({ careerTwin, evidenceVault, onHandof
                   ))
                 )}
               </div>
-            </div>
+            </CollapsibleSection>
           </div>
 
-          {/* Action Plan Section */}
+          
+      {/* Action Plan Section */}
           <div className="ci-action-plan-section">
             <div className="action-plan-header">
               <div className="plan-title-wrap">
@@ -720,75 +765,7 @@ export default function CareerIntelligence({ careerTwin, evidenceVault, onHandof
         </>
       )}
 
-      {/* Create Target Modal */}
-      {showCreateModal && (
-        <div className="modal-backdrop" onClick={() => setShowCreateModal(false)}>
-          <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
-            <div className="modal-header">
-              <h3 className="modal-title">🎯 Create New Career Target</h3>
-              <button type="button" className="close-btn" onClick={() => setShowCreateModal(false)}>×</button>
-            </div>
-
-            <form onSubmit={handleCreateTarget} className="modal-form">
-              <div className="form-group">
-                <label className="form-label" htmlFor="role-input">Target Role Title *</label>
-                <input
-                  id="role-input"
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Senior Backend Engineer"
-                  value={targetRoleInput}
-                  onChange={e => setTargetRoleInput(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="company-input">Target Company (Optional)</label>
-                <input
-                  id="company-input"
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Stripe, OpenAI, Datadog"
-                  value={targetCompanyInput}
-                  onChange={e => setTargetCompanyInput(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="jd-text-input">Target Job Description / Requirements Text</label>
-                <textarea
-                  id="jd-text-input"
-                  className="form-textarea"
-                  rows={6}
-                  placeholder={`Paste target job requirements here, for example:\n\nRequirements:\n- Python microservices\n- PostgreSQL database\n- Kubernetes cluster orchestration\n\nPreferred:\n- Rust experience`}
-                  value={targetJdTextInput}
-                  onChange={e => setTargetJdTextInput(e.target.value)}
-                />
-                <span className="form-hint">
-                  Requirements will be deterministically analyzed using the existing Job Fit engine.
-                </span>
-              </div>
-
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setShowCreateModal(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={createSubmitting || !targetRoleInput.trim()}
-                >
-                  {createSubmitting ? 'Creating...' : 'Create Career Target'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+              </>
       )}
 
       {/* Evidence Provenance Modal / Drawer */}

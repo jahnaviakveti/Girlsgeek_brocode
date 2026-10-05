@@ -1,11 +1,48 @@
 const API_BASE_URL = 'http://localhost:8000/api';
 
+/**
+ * Extracts clean, human-readable error messages from backend responses.
+ * Handles strings, FastAPI validation lists, error objects, and fallbacks.
+ */
+function extractErrorMessage(errData, status, defaultMsg) {
+  if (!errData) return `${defaultMsg} (${status})`;
+  if (typeof errData.detail === 'string' && errData.detail.trim()) {
+    return errData.detail;
+  }
+  if (Array.isArray(errData.detail) && errData.detail.length > 0) {
+    return errData.detail
+      .map((item) => (typeof item === 'string' ? item : item.msg || item.message || JSON.stringify(item)))
+      .join('; ');
+  }
+  if (errData.detail && typeof errData.detail === 'object') {
+    return errData.detail.msg || errData.detail.message || JSON.stringify(errData.detail);
+  }
+  if (typeof errData.message === 'string' && errData.message.trim()) {
+    return errData.message;
+  }
+  if (typeof errData.error === 'string' && errData.error.trim()) {
+    return errData.error;
+  }
+  return `${defaultMsg} (${status})`;
+}
+
+
+
+async function fetchWithAuth(url, options = {}) {
+  const token = localStorage.getItem('vettora_token');
+  const headers = { ...options.headers };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return fetch(url, { ...options, headers });
+}
+
 export const coachApi = {
   /**
    * Health check for coach layer
    */
   async checkHealth() {
-    const res = await fetch(`${API_BASE_URL}/coach/health`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/health`);
     if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
     return res.json();
   },
@@ -13,19 +50,50 @@ export const coachApi = {
   /**
    * Ingest a single candidate resume PDF
    * @param {File} resumeFile
+   * @param {Object} options
    */
-  async uploadResume(resumeFile) {
+  async uploadResume(resumeFile, { timeoutMs = 60000 } = {}) {
+    if (!resumeFile) {
+      throw new Error('A resume PDF file is required.');
+    }
     const formData = new FormData();
     formData.append('resume_file', resumeFile);
-    const res = await fetch(`${API_BASE_URL}/coach/resume`, {
-      method: 'POST',
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `Upload failed with status ${res.status}`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const res = await fetchWithAuth(`${API_BASE_URL}/coach/resume`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        let errData = null;
+        try {
+          errData = await res.json();
+        } catch {
+          const text = await res.text().catch(() => '');
+          errData = { detail: text || `HTTP ${res.status}` };
+        }
+        const errorMsg = extractErrorMessage(errData, res.status, 'Upload failed');
+        throw new Error(errorMsg);
+      }
+      return await res.json();
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error(`Resume parsing timed out after ${timeoutMs / 1000} seconds. Please verify the backend service is responding.`);
+      }
+      if (err.message === 'Failed to fetch') {
+        throw new Error('Cannot connect to backend server at http://localhost:8000. Please ensure the backend is running.');
+      }
+      throw err;
     }
-    return res.json();
   },
 
   /**
@@ -43,7 +111,7 @@ export const coachApi = {
     if (jdText) {
       formData.append('jd_text', jdText);
     }
-    const res = await fetch(`${API_BASE_URL}/coach/job-fit`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/job-fit`, {
       method: 'POST',
       body: formData,
     });
@@ -59,7 +127,7 @@ export const coachApi = {
    * @param {string} candidateId
    */
   async getCareerTwin(candidateId) {
-    const res = await fetch(`${API_BASE_URL}/coach/career-twin`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-twin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ candidate_id: candidateId }),
@@ -85,7 +153,7 @@ export const coachApi = {
     if (filters.experience) params.append('experience', filters.experience);
 
     const queryStr = params.toString() ? `?${params.toString()}` : '';
-    const res = await fetch(`${API_BASE_URL}/coach/evidence/${encodeURIComponent(candidateId)}${queryStr}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/evidence/${encodeURIComponent(candidateId)}${queryStr}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Evidence query failed with status ${res.status}`);
@@ -99,7 +167,7 @@ export const coachApi = {
    * @param {string} claim
    */
   async validateClaim(candidateId, claim) {
-    const res = await fetch(`${API_BASE_URL}/coach/evidence/validate`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/evidence/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ candidate_id: candidateId, claim }),
@@ -112,10 +180,28 @@ export const coachApi = {
   },
 
   /**
+   * Resume Coach API (Phase 4)
+   * Generate Evidence-Locked Resume Rewrite
+   * @param {Object} payload
+   */
+  async generateResumeRewrite(payload) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/resume-coach`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Server error (${res.status})`);
+    }
+    return res.json();
+  },
+
+  /**
    * Resume Versions & Builder API (Phase 5)
    */
   async getResumeVersions(candidateId) {
-    const res = await fetch(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(candidateId)}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(candidateId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch resume versions: ${res.status}`);
@@ -124,7 +210,7 @@ export const coachApi = {
   },
 
   async getResumeVersionDetail(candidateId, versionId) {
-    const res = await fetch(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(candidateId)}/${encodeURIComponent(versionId)}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(candidateId)}/${encodeURIComponent(versionId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch resume version: ${res.status}`);
@@ -133,7 +219,7 @@ export const coachApi = {
   },
 
   async createResumeVersion(candidateId, title, targetRole = null, parentVersionId = null) {
-    const res = await fetch(`${API_BASE_URL}/coach/resume-versions`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/resume-versions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -151,7 +237,7 @@ export const coachApi = {
   },
 
   async applySuggestionToVersion(versionId, suggestion, createNewVersion = false, title = null) {
-    const res = await fetch(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(versionId)}/apply-suggestion`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(versionId)}/apply-suggestion`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -168,7 +254,7 @@ export const coachApi = {
   },
 
   async recheckJobFit(versionId, jobText, targetRole = null, company = null, previousCoverage = null) {
-    const res = await fetch(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(versionId)}/recheck-job-fit`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(versionId)}/recheck-job-fit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -186,7 +272,7 @@ export const coachApi = {
   },
 
   async cloneResumeVersion(versionId, title = null) {
-    const res = await fetch(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(versionId)}/clone`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(versionId)}/clone`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
@@ -199,7 +285,7 @@ export const coachApi = {
   },
 
   async getVersionDiff(versionId) {
-    const res = await fetch(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(versionId)}/diff`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/resume-versions/${encodeURIComponent(versionId)}/diff`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch diff: ${res.status}`);
@@ -212,10 +298,26 @@ export const coachApi = {
   },
 
   /**
+   * Authenticated PDF export. Returns the PDF as a Blob.
+   * (Plain <a href> navigation cannot attach the Authorization header.)
+   */
+  async exportResumeVersionPdf(versionId) {
+    const res = await fetchWithAuth(this.getExportPdfUrl(versionId), {
+      method: 'GET',
+      headers: { Accept: 'application/pdf' },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(err, res.status, 'Failed to export PDF'));
+    }
+    return res.blob();
+  },
+
+  /**
    * Career Targets & Intelligence API (Phase 6)
    */
   async createCareerTarget(data) {
-    const res = await fetch(`${API_BASE_URL}/coach/career-targets`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-targets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -228,7 +330,7 @@ export const coachApi = {
   },
 
   async getCareerTargets(candidateId) {
-    const res = await fetch(`${API_BASE_URL}/coach/career-targets/${encodeURIComponent(candidateId)}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-targets/${encodeURIComponent(candidateId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch career targets: ${res.status}`);
@@ -237,7 +339,7 @@ export const coachApi = {
   },
 
   async getCareerTargetDetail(candidateId, targetId) {
-    const res = await fetch(`${API_BASE_URL}/coach/career-targets/${encodeURIComponent(candidateId)}/${encodeURIComponent(targetId)}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-targets/${encodeURIComponent(candidateId)}/${encodeURIComponent(targetId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch career target: ${res.status}`);
@@ -250,7 +352,7 @@ export const coachApi = {
     if (previousCoverage !== null && previousCoverage !== undefined) {
       url += `?previous_coverage=${encodeURIComponent(previousCoverage)}`;
     }
-    const res = await fetch(url);
+    const res = await fetchWithAuth(url);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch career intelligence: ${res.status}`);
@@ -263,7 +365,7 @@ export const coachApi = {
     if (previousCoverage !== null && previousCoverage !== undefined) {
       url += `&previous_coverage=${encodeURIComponent(previousCoverage)}`;
     }
-    const res = await fetch(url, {
+    const res = await fetchWithAuth(url, {
       method: 'POST',
     });
     if (!res.ok) {
@@ -274,7 +376,7 @@ export const coachApi = {
   },
 
   async createCareerAction(data) {
-    const res = await fetch(`${API_BASE_URL}/coach/career-actions`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-actions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -291,7 +393,7 @@ export const coachApi = {
     if (targetId) {
       url += `?target_id=${encodeURIComponent(targetId)}`;
     }
-    const res = await fetch(url);
+    const res = await fetchWithAuth(url);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch career actions: ${res.status}`);
@@ -300,7 +402,7 @@ export const coachApi = {
   },
 
   async completeCareerAction(actionId, candidateId) {
-    const res = await fetch(`${API_BASE_URL}/coach/career-actions/${encodeURIComponent(actionId)}/complete?candidate_id=${encodeURIComponent(candidateId)}`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-actions/${encodeURIComponent(actionId)}/complete?candidate_id=${encodeURIComponent(candidateId)}`, {
       method: 'POST',
     });
     if (!res.ok) {
@@ -311,7 +413,7 @@ export const coachApi = {
   },
 
   async dismissCareerAction(actionId, candidateId) {
-    const res = await fetch(`${API_BASE_URL}/coach/career-actions/${encodeURIComponent(actionId)}/dismiss?candidate_id=${encodeURIComponent(candidateId)}`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-actions/${encodeURIComponent(actionId)}/dismiss?candidate_id=${encodeURIComponent(candidateId)}`, {
       method: 'POST',
     });
     if (!res.ok) {
@@ -326,7 +428,7 @@ export const coachApi = {
   // ==========================================
 
   async createInterviewTarget(candidateId, targetRole, company = null, jobDescriptionText = null, targetId = null) {
-    const res = await fetch(`${API_BASE_URL}/coach/interview-targets`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/interview-targets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -345,7 +447,7 @@ export const coachApi = {
   },
 
   async getInterviewTargets(candidateId) {
-    const res = await fetch(`${API_BASE_URL}/coach/interview-targets/${encodeURIComponent(candidateId)}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/interview-targets/${encodeURIComponent(candidateId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch interview targets: ${res.status}`);
@@ -354,7 +456,7 @@ export const coachApi = {
   },
 
   async getInterviewTargetDetail(candidateId, targetId) {
-    const res = await fetch(`${API_BASE_URL}/coach/interview-targets/${encodeURIComponent(candidateId)}/${encodeURIComponent(targetId)}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/interview-targets/${encodeURIComponent(candidateId)}/${encodeURIComponent(targetId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch interview target: ${res.status}`);
@@ -363,7 +465,7 @@ export const coachApi = {
   },
 
   async getInterviewReadiness(candidateId, targetId) {
-    const res = await fetch(`${API_BASE_URL}/coach/interview-readiness/${encodeURIComponent(candidateId)}/${encodeURIComponent(targetId)}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/interview-readiness/${encodeURIComponent(candidateId)}/${encodeURIComponent(targetId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch interview readiness: ${res.status}`);
@@ -372,7 +474,7 @@ export const coachApi = {
   },
 
   async refreshInterviewReadiness(targetId, candidateId) {
-    const res = await fetch(`${API_BASE_URL}/coach/interview-readiness/${encodeURIComponent(targetId)}/refresh?candidate_id=${encodeURIComponent(candidateId)}`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/interview-readiness/${encodeURIComponent(targetId)}/refresh?candidate_id=${encodeURIComponent(candidateId)}`, {
       method: 'POST',
     });
     if (!res.ok) {
@@ -383,7 +485,7 @@ export const coachApi = {
   },
 
   async getInterviewQuestions(targetId, candidateId) {
-    const res = await fetch(`${API_BASE_URL}/coach/interview-questions/${encodeURIComponent(targetId)}?candidate_id=${encodeURIComponent(candidateId)}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/interview-questions/${encodeURIComponent(targetId)}?candidate_id=${encodeURIComponent(candidateId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch questions: ${res.status}`);
@@ -392,7 +494,7 @@ export const coachApi = {
   },
 
   async validateInterviewAnswer(candidateId, questionId, answerText, requirementId = null, targetId = null) {
-    const res = await fetch(`${API_BASE_URL}/coach/interview-answers/validate`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/interview-answers/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -411,7 +513,7 @@ export const coachApi = {
   },
 
   async createInterviewSession(candidateId, interviewTargetId) {
-    const res = await fetch(`${API_BASE_URL}/coach/interview-sessions`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/interview-sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -427,7 +529,7 @@ export const coachApi = {
   },
 
   async submitSessionAnswer(sessionId, candidateId, questionId, answerText) {
-    const res = await fetch(`${API_BASE_URL}/coach/interview-sessions/${encodeURIComponent(sessionId)}/answer`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/interview-sessions/${encodeURIComponent(sessionId)}/answer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -444,10 +546,207 @@ export const coachApi = {
   },
 
   async getProjectStories(candidateId) {
-    const res = await fetch(`${API_BASE_URL}/coach/project-stories/${encodeURIComponent(candidateId)}`);
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/project-stories/${encodeURIComponent(candidateId)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed to fetch project stories: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  // ==========================================
+  // Phase 8: Career Execution & Progress
+  // ==========================================
+
+  async createCareerExecution(payload) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-executions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to create career execution: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async getCareerExecutions(candidateId) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-executions/${encodeURIComponent(candidateId)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to fetch career executions: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async getCareerExecutionDetail(candidateId, executionId) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-executions/${encodeURIComponent(candidateId)}/${encodeURIComponent(executionId)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to fetch execution detail: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async startCareerExecution(executionId, payload) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-executions/${encodeURIComponent(executionId)}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to start execution: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async updateCareerExecutionProgress(executionId, payload) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-executions/${encodeURIComponent(executionId)}/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to update progress: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async submitCareerExecutionArtifact(executionId, payload) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-executions/${encodeURIComponent(executionId)}/submit-artifact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to submit artifact: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async completeCareerExecution(executionId, payload) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-executions/${encodeURIComponent(executionId)}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to complete execution: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async blockCareerExecution(executionId, payload) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-executions/${encodeURIComponent(executionId)}/block`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to record blocker: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async verifyCareerExecutionEvidence(executionId, payload) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-executions/${encodeURIComponent(executionId)}/verify-evidence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to verify evidence: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async getCareerTargetProgress(targetId, candidateId) {
+    const params = candidateId ? `?candidate_id=${encodeURIComponent(candidateId)}` : '';
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/career-targets/${encodeURIComponent(targetId)}/progress${params}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to fetch target progress: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  /**
+   * Phase 9: Career Showcase APIs
+   */
+  async getShowcase(candidateId) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/showcase/${encodeURIComponent(candidateId)}`, {
+      headers: { 'X-Candidate-ID': candidateId },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to fetch showcase: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async updateShowcase(candidateId, payload) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/showcase/${encodeURIComponent(candidateId)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Candidate-ID': candidateId,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to update showcase: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async generateShareToken(candidateId) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/showcase/${encodeURIComponent(candidateId)}/share-token`, {
+      method: 'POST',
+      headers: { 'X-Candidate-ID': candidateId },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to generate share token: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async revokeShareToken(candidateId) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/showcase/${encodeURIComponent(candidateId)}/revoke-share`, {
+      method: 'POST',
+      headers: { 'X-Candidate-ID': candidateId },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to revoke share token: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async getPublicShowcase(shareToken) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/showcase/public/${encodeURIComponent(shareToken)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Showcase not found: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async exportShowcase(candidateId) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/coach/showcase/${encodeURIComponent(candidateId)}/export`, {
+      headers: { 'X-Candidate-ID': candidateId },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to export showcase: ${res.status}`);
     }
     return res.json();
   },
@@ -463,7 +762,7 @@ export const coachApi = {
     resumeFiles.forEach((file) => {
       formData.append('resume_files', file);
     });
-    const res = await fetch(`${API_BASE_URL}/analyze`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/analyze`, {
       method: 'POST',
       body: formData,
     });
@@ -473,4 +772,45 @@ export const coachApi = {
     }
     return res.json();
   },
+};
+
+export const authApi = {
+  async register(name, email, password) {
+    const res = await fetchWithAuth(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Registration failed');
+    }
+    return res.json();
+  },
+  
+  async login(email, password) {
+    const formData = new FormData();
+    formData.append('username', email);
+    formData.append('password', password);
+    
+    const res = await fetchWithAuth(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Login failed');
+    }
+    return res.json();
+  },
+  
+  async getCurrentUser() {
+    const res = await fetchWithAuth(`${API_BASE_URL}/auth/me`, {
+      });
+    if (!res.ok) {
+      throw new Error('Not authenticated');
+    }
+    return res.json();
+  }
 };

@@ -30,6 +30,29 @@ from app.db.repository import Repository
 from sqlalchemy.orm import Session
 
 
+def normalize_coverage_to_percentage(coverage: Optional[float]) -> float:
+    """
+    Ensures evidence coverage is converted to a percentage (0.0 to 100.0) exactly once.
+    If coverage is provided as a fraction (e.g. 0.659), converts it to 65.9.
+    If already a percentage (e.g. 65.9), preserves it.
+    """
+    if coverage is None:
+        return 0.0
+    val = float(coverage)
+    if 0.0 < val <= 1.0:
+        return round(val * 100, 1)
+    return round(val, 1)
+
+
+def format_coverage_percentage(coverage: Optional[float]) -> str:
+    """
+    Formats evidence coverage value to a percentage string (e.g. 65.9%).
+    Ensures a backend value of 0.659 formats as 65.9%, NEVER 6590.0%.
+    """
+    pct = normalize_coverage_to_percentage(coverage)
+    return f"{pct:.1f}%"
+
+
 class CareerIntelligenceService:
     """
     Career Intelligence & Gap Planning Service (Phase 6).
@@ -275,7 +298,8 @@ class CareerIntelligenceService:
         )
 
         analysis = fit_response.job_fit_analysis
-        evidence_coverage = fit_response.evidence_coverage or (analysis.fit_summary.evidence_coverage_score if analysis else fit_response.fit_score)
+        raw_cov = fit_response.evidence_coverage or (analysis.fit_summary.evidence_coverage_score if analysis else fit_response.fit_score)
+        evidence_coverage = normalize_coverage_to_percentage(raw_cov)
         
         # 1. Strengths (Evidence-grounded matches)
         strengths: List[CareerStrength] = []
@@ -514,7 +538,7 @@ class CareerIntelligenceService:
                 existing_req_ids.add(nv_gap.requirement_id)
 
         # 4. Progress Summary & Comparison
-        prev_cov = previous_coverage
+        prev_cov = normalize_coverage_to_percentage(previous_coverage) if previous_coverage is not None else None
         delta = round(evidence_coverage - prev_cov, 1) if prev_cov is not None else None
 
         improved_reqs = []

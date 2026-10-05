@@ -2,6 +2,16 @@ import datetime
 from sqlalchemy import Column, Integer, String, Text, Float, DateTime, Boolean
 from .database import Base
 
+class UserRecord(Base):
+    __tablename__ = "users"
+
+    id = Column(String(64), primary_key=True, index=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
 class CandidateProfileRecord(Base):
     __tablename__ = "candidate_profiles"
 
@@ -148,5 +158,56 @@ class MockInterviewSessionRecord(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
+class CareerExecutionRecord(Base):
+    __tablename__ = "career_executions"
 
+    id = Column(Integer, primary_key=True, index=True)
+    execution_id = Column(String(64), unique=True, index=True, nullable=False)
+    candidate_id = Column(String(64), index=True, nullable=False)
+    action_id = Column(String(64), index=True, nullable=False)
+    target_id = Column(String(64), index=True, nullable=False)
+    status = Column(String(32), default="NOT_STARTED", nullable=False)
+    progress_state = Column(String(32), default="PLANNED", nullable=False)
+    progress_percent = Column(Integer, default=0, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    notes_json = Column(Text, default="[]", nullable=False)
+    blocker_reason = Column(Text, nullable=True)
+    next_step = Column(Text, nullable=True)
+    artifact_references_json = Column(Text, default="[]", nullable=False)
+    evidence_ids_json = Column(Text, default="[]", nullable=False)
+    claim_scope = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
+class ExecutionTimelineEventRecord(Base):
+    __tablename__ = "execution_timeline_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String(64), unique=True, index=True, nullable=False)
+    candidate_id = Column(String(64), index=True, nullable=False)
+    target_id = Column(String(64), index=True, nullable=False)
+    execution_id = Column(String(64), nullable=True, index=True)
+    event_type = Column(String(64), nullable=False)
+    description = Column(Text, nullable=False)
+    evidence_ids_json = Column(Text, default="[]", nullable=False)
+    metadata_json = Column(Text, default="{}", nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class CareerShowcaseRecord(Base):
+    __tablename__ = "career_showcases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    showcase_id = Column(String(64), unique=True, index=True, nullable=False)
+    candidate_id = Column(String(64), index=True, nullable=False)
+    headline = Column(String(255), nullable=True)
+    bio = Column(Text, nullable=True)
+    visibility = Column(String(32), default="PRIVATE", nullable=False)  # PRIVATE, SHAREABLE, PUBLIC
+    share_token = Column(String(64), unique=True, index=True, nullable=True)
+    selected_target_id = Column(String(64), nullable=True)
+    featured_project_ids_json = Column(Text, default="[]", nullable=False)
+    featured_skill_ids_json = Column(Text, default="[]", nullable=False)
+    show_provenance = Column(Boolean, default=True, nullable=False)
+    show_target_alignment = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

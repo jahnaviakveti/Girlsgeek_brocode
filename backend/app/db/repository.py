@@ -12,6 +12,9 @@ from .models import (
     CareerActionRecord,
     InterviewTargetRecord,
     MockInterviewSessionRecord,
+    CareerExecutionRecord,
+    ExecutionTimelineEventRecord,
+    CareerShowcaseRecord,
 )
 
 class Repository:
@@ -518,5 +521,168 @@ class Repository:
         if interview_target_id:
             query = query.filter_by(interview_target_id=interview_target_id)
         return query.order_by(MockInterviewSessionRecord.created_at.desc()).all()
+
+    # 9. Career Executions (Phase 8)
+    def save_career_execution(
+        self,
+        execution_id: str,
+        candidate_id: str,
+        action_id: str,
+        target_id: str,
+        status: str = "NOT_STARTED",
+        progress_state: str = "PLANNED",
+        progress_percent: int = 0,
+        started_at: Optional[Any] = None,
+        completed_at: Optional[Any] = None,
+        notes: Optional[List[Dict[str, Any]]] = None,
+        blocker_reason: Optional[str] = None,
+        next_step: Optional[str] = None,
+        artifact_references: Optional[List[Dict[str, Any]]] = None,
+        evidence_ids: Optional[List[str]] = None,
+        claim_scope: Optional[str] = None,
+    ) -> CareerExecutionRecord:
+        record = self.db.query(CareerExecutionRecord).filter_by(execution_id=execution_id).first()
+        notes_json = json.dumps(notes or [], default=str)
+        artifacts_json = json.dumps(artifact_references or [], default=str)
+        evidence_json = json.dumps(evidence_ids or [], default=str)
+
+        if record:
+            record.candidate_id = candidate_id
+            record.action_id = action_id
+            record.target_id = target_id
+            record.status = status
+            record.progress_state = progress_state
+            record.progress_percent = progress_percent
+            if started_at is not None:
+                record.started_at = started_at
+            if completed_at is not None:
+                record.completed_at = completed_at
+            record.notes_json = notes_json
+            record.blocker_reason = blocker_reason
+            record.next_step = next_step
+            record.artifact_references_json = artifacts_json
+            record.evidence_ids_json = evidence_json
+            record.claim_scope = claim_scope
+        else:
+            record = CareerExecutionRecord(
+                execution_id=execution_id,
+                candidate_id=candidate_id,
+                action_id=action_id,
+                target_id=target_id,
+                status=status,
+                progress_state=progress_state,
+                progress_percent=progress_percent,
+                started_at=started_at,
+                completed_at=completed_at,
+                notes_json=notes_json,
+                blocker_reason=blocker_reason,
+                next_step=next_step,
+                artifact_references_json=artifacts_json,
+                evidence_ids_json=evidence_json,
+                claim_scope=claim_scope,
+            )
+            self.db.add(record)
+        self.db.commit()
+        self.db.refresh(record)
+        return record
+
+    def get_career_execution(self, execution_id: str) -> Optional[CareerExecutionRecord]:
+        return self.db.query(CareerExecutionRecord).filter_by(execution_id=execution_id).first()
+
+    def get_career_execution_by_action(self, action_id: str) -> Optional[CareerExecutionRecord]:
+        return self.db.query(CareerExecutionRecord).filter_by(action_id=action_id).first()
+
+    def get_career_executions_for_candidate(
+        self,
+        candidate_id: str,
+        target_id: Optional[str] = None,
+        status: Optional[str] = None
+    ) -> List[CareerExecutionRecord]:
+        query = self.db.query(CareerExecutionRecord).filter_by(candidate_id=candidate_id)
+        if target_id:
+            query = query.filter_by(target_id=target_id)
+        if status:
+            query = query.filter_by(status=status)
+        return query.order_by(CareerExecutionRecord.created_at.desc()).all()
+
+    # 10. Execution Timeline Events (Phase 8)
+    def save_execution_timeline_event(
+        self,
+        event_id: str,
+        candidate_id: str,
+        target_id: str,
+        event_type: str,
+        description: str,
+        execution_id: Optional[str] = None,
+        evidence_ids: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> ExecutionTimelineEventRecord:
+        record = ExecutionTimelineEventRecord(
+            event_id=event_id,
+            candidate_id=candidate_id,
+            target_id=target_id,
+            execution_id=execution_id,
+            event_type=event_type,
+            description=description,
+            evidence_ids_json=json.dumps(evidence_ids or [], default=str),
+            metadata_json=json.dumps(metadata or {}, default=str),
+        )
+        self.db.add(record)
+        self.db.commit()
+        self.db.refresh(record)
+        return record
+
+    def get_execution_timeline_events_for_target(
+        self,
+        target_id: str,
+        candidate_id: Optional[str] = None
+    ) -> List[ExecutionTimelineEventRecord]:
+        query = self.db.query(ExecutionTimelineEventRecord).filter_by(target_id=target_id)
+        if candidate_id:
+            query = query.filter_by(candidate_id=candidate_id)
+        return query.order_by(ExecutionTimelineEventRecord.created_at.asc()).all()
+
+    # 11. Career Showcase (Phase 9)
+    def save_career_showcase(
+        self,
+        showcase_id: str,
+        candidate_id: str,
+        headline: Optional[str] = None,
+        bio: Optional[str] = None,
+        visibility: str = "PRIVATE",
+        share_token: Optional[str] = None,
+        selected_target_id: Optional[str] = None,
+        featured_project_ids: Optional[List[str]] = None,
+        featured_skill_ids: Optional[List[str]] = None,
+        show_provenance: bool = True,
+        show_target_alignment: bool = True,
+    ) -> CareerShowcaseRecord:
+        record = self.db.query(CareerShowcaseRecord).filter_by(candidate_id=candidate_id).first()
+        if not record:
+            record = CareerShowcaseRecord(
+                showcase_id=showcase_id,
+                candidate_id=candidate_id,
+            )
+            self.db.add(record)
+        record.headline = headline
+        record.bio = bio
+        record.visibility = visibility
+        record.share_token = share_token
+        record.selected_target_id = selected_target_id
+        record.featured_project_ids_json = json.dumps(featured_project_ids or [])
+        record.featured_skill_ids_json = json.dumps(featured_skill_ids or [])
+        record.show_provenance = show_provenance
+        record.show_target_alignment = show_target_alignment
+        self.db.commit()
+        self.db.refresh(record)
+        return record
+
+    def get_career_showcase_by_candidate(self, candidate_id: str) -> Optional[CareerShowcaseRecord]:
+        return self.db.query(CareerShowcaseRecord).filter_by(candidate_id=candidate_id).first()
+
+    def get_career_showcase_by_token(self, share_token: str) -> Optional[CareerShowcaseRecord]:
+        if not share_token:
+            return None
+        return self.db.query(CareerShowcaseRecord).filter_by(share_token=share_token).first()
 
 

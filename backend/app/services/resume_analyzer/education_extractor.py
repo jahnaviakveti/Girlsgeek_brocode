@@ -111,7 +111,16 @@ class EducationExtractor:
 
         # Chunk lines by blank lines or bullets
         for line in lines:
-            is_new_item = bool(re.match(r'^[•\-\*0-9\.]+', line)) or any(deg_pat.search(line) for deg_pat in DEGREE_PATTERNS)
+            has_degree = any(deg_pat.search(line) for deg_pat in DEGREE_PATTERNS)
+            has_inst = any(ind in line.lower() for ind in INSTITUTION_INDICATORS)
+
+            current_has_deg = any(any(deg_pat.search(cl) for deg_pat in DEGREE_PATTERNS) for cl in current_entry_lines)
+            current_has_inst = any(any(ind in cl.lower() for ind in INSTITUTION_INDICATORS) for cl in current_entry_lines)
+
+            is_new_item = False
+            if (has_degree and current_has_deg) or (has_inst and current_has_inst):
+                is_new_item = True
+            
             if is_new_item and current_entry_lines:
                 process_block(current_entry_lines)
                 current_entry_lines = [line]

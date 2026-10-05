@@ -191,12 +191,29 @@ class ResumeBuilderService:
         if twin.education:
             edu_items: List[ResumeSectionItem] = []
             for idx, edu in enumerate(twin.education):
+                degree = getattr(edu, "degree", "") or ""
+                institution = getattr(edu, "institution", "") or ""
+                title_parts = [p for p in [degree, institution] if p]
+                title_str = " - ".join(title_parts) if title_parts else "Education"
+
+                grad_date = getattr(edu, "graduation_date", None) or getattr(edu, "end_date", None)
+                start_date = getattr(edu, "start_date", None)
+                date_str = f"{start_date} - {grad_date}" if start_date and grad_date else (grad_date or start_date or None)
+
+                gpa = getattr(edu, "gpa", None) or getattr(edu, "grade_or_gpa", None)
+                field_of_study = getattr(edu, "field_of_study", None)
+                content_parts = []
+                if field_of_study:
+                    content_parts.append(f"Major: {field_of_study}")
+                if gpa:
+                    content_parts.append(f"GPA: {gpa}")
+
                 edu_items.append(
                     ResumeSectionItem(
                         item_id=f"item_edu_{idx+1}",
-                        title=f"{edu.degree} - {edu.institution}",
-                        subtitle=edu.graduation_date,
-                        content=f"GPA: {edu.gpa}" if edu.gpa else "",
+                        title=title_str,
+                        subtitle=date_str,
+                        content=", ".join(content_parts),
                         evidence_ids=[]
                     )
                 )
@@ -214,11 +231,17 @@ class ResumeBuilderService:
         if twin.certifications:
             cert_items: List[ResumeSectionItem] = []
             for idx, cert in enumerate(twin.certifications):
+                name = getattr(cert, "name", "Certification")
+                issuer = getattr(cert, "issuer", None)
+                cert_date = getattr(cert, "date", None)
+                subtitle_parts = [p for p in [issuer, cert_date] if p]
+                subtitle_str = " | ".join(subtitle_parts) if subtitle_parts else None
+
                 cert_items.append(
                     ResumeSectionItem(
                         item_id=f"item_cert_{idx+1}",
-                        title=cert.name,
-                        subtitle=f"{cert.issuer or ''} ({cert.date or ''})".strip(),
+                        title=name,
+                        subtitle=subtitle_str,
                         content="",
                         evidence_ids=[]
                     )

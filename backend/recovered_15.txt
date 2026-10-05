@@ -1,0 +1,68 @@
+Created At: 2026-10-04T17:14:08+05:30
+Completed At: 2026-10-04T17:14:08+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2107
+Total Bytes: 77770
+Showing lines 181 to 240
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+181:     vault = _in_memory_vaults.get(candidate_id)
+182:     if vault:
+183:         return vault
+184: 
+185:     repo = Repository(db)
+186:     records = repo.get_evidence_for_candidate(candidate_id)
+187:     if not records:
+188:         return None
+189: 
+190:     items: List[VaultEvidenceItem] = []
+191:     for r in records:
+192:         facts = json.loads(r.normalized_facts) if r.normalized_facts else []
+193:         techs = [t.strip() for t in (r.related_tech or "").split(",") if t.strip()]
+194:         items.append(
+195:             VaultEvidenceItem(
+196:                 evidence_id=r.evidence_id,
+197:                 candidate_id=r.candidate_id,
+198:                 source_text=r.source_text,
+199:                 source_document=r.source_document,
+200:                 source_section=r.source_section,
+201:                 page_number=r.page_number,
+202:                 evidence_type=r.evidence_type,
+203:                 confidence=r.confidence,
+204:                 normalized_facts=facts,
+205:                 related_entity=r.related_entity,
+206:                 related_skill=r.related_skill,
+207:                 related_project=r.related_project,
+208:                 related_experience=r.related_experience,
+209:                 related_technologies=techs,
+210:             )
+211:         )
+212: 
+213:     # Reconstruct indices
+214:     section_idx: Dict[str, List[str]] = {}
+215:     tech_idx: Dict[str, List[str]] = {}
+216:     type_idx: Dict[str, List[str]] = {}
+217:     skill_idx: Dict[str, List[str]] = {}
+218:     project_idx: Dict[str, List[str]] = {}
+219:     experience_idx: Dict[str, List[str]] = {}
+220: 
+221:     for item in items:
+222:         ev_id = item.evidence_id
+223:         if item.source_section:
+224:             section_idx.setdefault(item.source_section.lower(), []).append(ev_id)
+225:         type_idx.setdefault(item.evidence_type.upper(), []).append(ev_id)
+226:         for t in item.related_technologies:
+227:             tech_idx.setdefault(t.lower(), []).append(ev_id)
+228:         if item.related_skill:
+229:             skill_idx.setdefault(item.related_skill.lower(), []).append(ev_id)
+230:         if item.related_project:
+231:             project_idx.setdefault(item.related_project.lower(), []).append(ev_id)
+232:         if item.related_experience:
+233:             experience_idx.setdefault(item.related_experience.lower(), []).append(ev_id)
+234: 
+235:     vault = EvidenceVault(
+236:         vault_id=f"vault_{candidate_id}",
+237:         candidate_id=candidate_id,
+238:         total_items=len(items),
+239:         items=items,
+240:         section_index=section_idx,
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

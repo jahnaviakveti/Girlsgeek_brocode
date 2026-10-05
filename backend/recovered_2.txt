@@ -1,0 +1,139 @@
+Created At: 2026-10-04T16:22:58+05:30
+Completed At: 2026-10-04T16:23:00+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2102
+Total Bytes: 77466
+Showing lines 1170 to 1300
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1170:     "/career-intelligence/{candidate_id}/{target_id}",
+1171:     response_model=CareerIntelligenceResponse,
+1172:     status_code=status.HTTP_200_OK,
+1173:     summary="Get Career Intelligence",
+1174:     description="Generates comprehensive career intelligence, gap breakdown, and safe action plans."
+1175: )
+1176: def get_career_intelligence(
+1177:     candidate_id: str,
+1178:     target_id: str,
+1179:     previous_coverage: Optional[float] = Query(None),
+1180:     db: Session = Depends(get_db)
+1181: ) -> CareerIntelligenceResponse:
+1182:     target = _get_or_load_target(target_id, db)
+1183:     if not target:
+1184:         raise HTTPException(status_code=404, detail=f"Career target '{target_id}' not found.")
+1185:     if target.candidate_id != candidate_id:
+1186:         raise HTTPException(
+1187:             status_code=403,
+1188:             detail=f"Security violation: Target '{target_id}' does not belong to candidate '{candidate_id}'."
+1189:         )
+1190: 
+1191:     twin = _get_or_load_twin(candidate_id, db)
+1192:     if not twin:
+1193:         raise HTTPException(status_code=404, detail=f"Candidate twin for '{candidate_id}' not found.")
+1194: 
+1195:     vault = _get_or_load_vault(candidate_id, db)
+1196:     if not vault:
+1197:         raise HTTPException(status_code=404, detail=f"Evidence vault for '{candidate_id}' not found.")
+1198: 
+1199:     try:
+1200:         return _career_intelligence_service.analyze_target_intelligence(
+1201:             target=target,
+1202:             twin=twin,
+1203:             vault=vault,
+1204:             db=db,
+1205:             previous_coverage=previous_coverage
+1206:         )
+1207:     except PermissionError as exc:
+1208:         raise HTTPException(status_code=403, detail=str(exc))
+1209:     except Exception as exc:
+1210:         raise HTTPException(status_code=500, detail=f"Career intelligence analysis failed: {str(exc)}")
+1211: 
+1212: @router.post(
+1213:     "/career-intelligence/{target_id}/refresh",
+1214:     response_model=CareerIntelligenceResponse,
+1215:     status_code=status.HTTP_200_OK,
+1216:     summary="Refresh Career Intelligence",
+1217:     description="Re-evaluates Job Fit and career gaps with current Career Twin & Evidence Vault data."
+1218: )
+1219: def refresh_career_intelligence(
+1220:     target_id: str,
+1221:     payload: RefreshTargetRequest,
+1222:     db: Session = Depends(get_db)
+1223: ) -> CareerIntelligenceResponse:
+1224:     target = _get_or_load_target(target_id, db)
+1225:     if not target:
+1226:         raise HTTPException(status_code=404, detail=f"Career target '{target_id}' not found.")
+1227:     if target.candidate_id != payload.candidate_id:
+1228:         raise HTTPException(
+1229:             status_code=403,
+1230:             detail=f"Security violation: Target '{target_id}' does not belong to candidate '{payload.candidate_id}'."
+1231:         )
+1232: 
+1233:     twin = _get_or_load_twin(payload.candidate_id, db)
+1234:     if not twin:
+1235:         raise HTTPException(status_code=404, detail=f"Candidate twin for '{payload.candidate_id}' not found.")
+1236: 
+1237:     vault = _get_or_load_vault(payload.candidate_id, db)
+1238:     if not vault:
+1239:         raise HTTPException(status_code=404, detail=f"Evidence vault for '{payload.candidate_id}' not found.")
+1240: 
+1241:     try:
+1242:         return _career_intelligence_service.refresh_target_intelligence(
+1243:             target=target,
+1244:             twin=twin,
+1245:             vault=vault,
+1246:             db=db,
+1247:             previous_coverage=payload.previous_coverage
+1248:         )
+1249:     except PermissionError as exc:
+1250:         raise HTTPException(status_code=403, detail=str(exc))
+1251:     except Exception as exc:
+1252:         raise HTTPException(status_code=500, detail=f"Career intelligence refresh failed: {str(exc)}")
+1253: 
+1254: @router.post(
+1255:     "/career-actions",
+1256:     response_model=CareerAction,
+1257:     status_code=status.HTTP_201_CREATED,
+1258:     summary="Create Career Action",
+1259:     description="Adds a specific task to the candidate's action plan."
+1260: )
+1261: def create_career_action(
+1262:     payload: CreateCareerActionRequest,
+1263:     db: Session = Depends(get_db)
+1264: ) -> CareerAction:
+1265:     action_id = f"act_{uuid.uuid4().hex[:10]}"
+1266:     repo = Repository(db)
+1267:     rec = repo.save_career_action(
+1268:         action_id=action_id,
+1269:         candidate_id=payload.candidate_id,
+1270:         target_id=payload.target_id,
+1271:         requirement_id=payload.requirement_id,
+1272:         action_type=payload.action_type.value,
+1273:         title=payload.title,
+1274:         description=payload.description,
+1275:         rationale=payload.rationale,
+1276:         priority=payload.priority.value if payload.priority else "MEDIUM",
+1277:         status="TODO"
+1278:     )
+1279:     return CareerAction(
+1280:         action_id=rec.action_id,
+1281:         candidate_id=rec.candidate_id,
+1282:         target_id=rec.target_id,
+1283:         requirement_id=rec.requirement_id,
+1284:         action_type=ActionType(rec.action_type),
+1285:         title=rec.title,
+1286:         description=rec.description,
+1287:         rationale=rec.rationale,
+1288:         priority=GapPriority(rec.priority),
+1289:         status=ActionStatus(rec.status),
+1290:         created_at=rec.created_at,
+1291:         completed_at=rec.completed_at
+1292:     )
+1293: 
+1294: @router.get(
+1295:     "/career-actions/{candidate_id}",
+1296:     response_model=List[CareerAction],
+1297:     status_code=status.HTTP_200_OK,
+1298:     summary="List Career Actions",
+1299:     description="Retrieves action plan items for a candidate, with optional target filtering."
+1300: )
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

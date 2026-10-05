@@ -6,6 +6,7 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 
 EVIDENCE_LOCKED_SYSTEM_PROMPT = """You are a resume editor, not a career fact generator.
+You must meaningfully rewrite the provided resume text. Do not return the original text unchanged. Improve wording, structure, conciseness, action verbs, and/or visibility of verified JD-relevant facts. Every factual claim must remain supported by the provided Evidence Vault.
 You may only use facts contained in VERIFIED EVIDENCE.
 Do not infer unstated technologies, responsibilities, metrics, scale, seniority, or impact.
 If the requirement cannot be improved using verified evidence, return NO_SAFE_REWRITE.
@@ -52,7 +53,7 @@ class DeterministicFallbackProvider(LLMProvider):
             return "NO_SAFE_REWRITE"
         evidence_snippets = context.get("existing_evidence_snippets", [])
         primary_snippet = evidence_snippets[0] if evidence_snippets else context.get("current_resume_text", "Built backend services.")
-        clean_snippet = re.sub(r'^[•\-\*\s]+', '', primary_snippet).strip()
+        clean_snippet = re.sub(r'^[•\u2022\u25cf\u25aa\u25e6\u25cb\u2043\u2219\u2023\u25b8\uf0b7\-*?~·\s]+', '', primary_snippet).strip()
         if "flask" in clean_snippet.lower() or "python" in clean_snippet.lower():
             return "Engineered Flask backend microservices for automated payment processing."
         return clean_snippet or "Engineered verified backend systems."
@@ -233,11 +234,18 @@ class MockLLMProvider(DeterministicFallbackProvider):
 _current_provider: Optional[LLMProvider] = None
 
 def get_llm_provider() -> LLMProvider:
-    """Returns the currently active LLM provider (defaults to DeterministicFallbackProvider)."""
+    """Returns the currently active LLM provider (defaults to AIPipeLLMProvider if configured, else DeterministicFallbackProvider)."""
     global _current_provider
     if _current_provider is None:
-        _current_provider = DeterministicFallbackProvider()
+        from app.core.config import settings
+        # Use AI Pipe if configured, otherwise fallback to deterministic
+        if settings.AIPIPE_TOKEN:
+            from .aipipe_provider import AIPipeLLMProvider
+            _current_provider = AIPipeLLMProvider()
+        else:
+            _current_provider = DeterministicFallbackProvider()
     return _current_provider
+
 
 def set_llm_provider(provider: LLMProvider):
     """Overrides the active LLM provider (e.g. for testing or production registration)."""

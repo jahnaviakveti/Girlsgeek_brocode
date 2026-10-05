@@ -33,12 +33,15 @@ def normalize_text(text: str) -> str:
     # Preserves bullet points or hyphenated lists like '- Item'
     normalized = re.sub(r'(\b[A-Za-z]{2,})-\n([a-z]{2,}\b)', r'\1\2', normalized)
 
-    # 5. Normalize whitespace within each line
+    # 5. Normalize whitespace within each line and standardize bullet markers
     lines = normalized.split("\n")
     cleaned_lines = []
     for line in lines:
         # Collapse multiple horizontal tabs/spaces to a single space, strip margins
         cleaned_line = re.sub(r'[ \t]+', ' ', line).strip()
+        # Normalize stray '?' bullet artifacts (unmapped PDF bullet glyphs) and bullet symbols at start of line
+        cleaned_line = re.sub(r'^\?\s*(?=[A-Za-z0-9])', '• ', cleaned_line)
+        cleaned_line = re.sub(r'^[\u2022\u25cf\u25aa\u25e6\u25cb\u2043\u2219\u2023\u25b8\uf0b7]\s*', '• ', cleaned_line)
         cleaned_lines.append(cleaned_line)
 
     normalized = "\n".join(cleaned_lines)

@@ -1,23 +1,96 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { coachApi } from '../services/api';
+import './ResumeCoach.css'; // Let's create a new specific CSS file
+
+const cleanBulletText = (text) => {
+  if (!text) return '';
+  return text
+    .replace(/^[•\u2022\u25cf\u25aa\u25e6\u25cb\u2043\u2219\u2023\u25b8\uf0b7\-*?~·]\s*/, '')
+    .trim();
+};
 
 export default function ResumeCoach({ careerTwin, handoffPayload, onClearHandoff, onNavigateToBuilder }) {
-  const [loading, setLoading] = useState(false);
-  const [rewriteResult, setRewriteResult] = useState(null);
-  const [accepted, setAccepted] = useState(false);
+  const [loadingIds, setLoadingIds] = useState(new Set());
+  const [results, setResults] = useState({});
+  const [accepted, setAccepted] = useState({});
   const [errorMsg, setErrorMsg] = useState(null);
   const [applyingToDraft, setApplyingToDraft] = useState(false);
-  const [appliedVersion, setAppliedVersion] = useState(null);
+  const [filter, setFilter] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const [prevReqId, setPrevReqId] = useState(handoffPayload?.requirement_id);
-  if (handoffPayload?.requirement_id !== prevReqId) {
-    setPrevReqId(handoffPayload?.requirement_id);
-    setRewriteResult(null);
-    setAccepted(false);
+  const isBulk = handoffPayload?.bulk;
+  const items = useMemo(() => {
+    return isBulk ? (handoffPayload.items || []) : (handoffPayload ? [handoffPayload] : []);
+  }, [isBulk, handoffPayload]);
+
+  const handleGenerateRewrite = async (item) => {
+    if (!item) return;
+    setLoadingIds(prev => new Set(prev).add(item.requirement_id));
     setErrorMsg(null);
-    setAppliedVersion(null);
-  }
 
+    try {
+      const payload = {
+        candidate_id: item.candidate_id || careerTwin.candidate_id,
+        requirement_id: item.requirement_id,
+        requirement_text: item.requirement_text,
+        target_role: item.target_role,
+        priority: item.priority || "REQUIRED",
+        gap_type: item.gap_type || "RESUME_VISIBILITY_GAP",
+        evidence_ids: item.evidence_ids || [],
+        existing_evidence_snippets: item.existing_evidence_snippets || [],
+        missing_elements: item.missing_elements || [],
+        current_resume_text: cleanBulletText(item.existing_evidence_snippets?.[0] || ""),
+        action_prompt: item.action_prompt || ""
+      };
+
+      const data = await coachApi.generateResumeRewrite(payload);
+      setResults(prev => ({...prev, [item.requirement_id]: data}));
+      setAccepted(prev => ({...prev, [item.requirement_id]: data.status === 'ACCEPTED'}));
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || 'Failed to generate resume rewrite.');
+    } finally {
+      setLoadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(item.requirement_id);
+        return next;
+      });
+    }
+  };
+
+  const handleBulkGenerateAll = async () => {
+    const visibilityGaps = items.filter(i => i.gap_type === 'RESUME_VISIBILITY_GAP' && !results[i.requirement_id]);
+    for (const item of visibilityGaps) {
+      await handleGenerateRewrite(item);
+    }
+  };
+
+  const handleCreateTailoredVersion = async () => {
+    setApplyingToDraft(true);
+    try {
+      const targetTitle = handoffPayload?.target_role 
+        ? `${handoffPayload.target_role} — Targeted Resume` 
+        : "Targeted Resume Draft";
+      
+      let targetVersion = await coachApi.createResumeVersion(
+        careerTwin.candidate_id, 
+        targetTitle, 
+        handoffPayload?.target_role || null
+      );
+      
+      const itemsToApply = Object.values(results).filter(r => accepted[r.requirement_id] && r.status === 'ACCEPTED');
+      for (const sug of itemsToApply) {
+        targetVersion = await coachApi.applySuggestionToVersion(targetVersion.version_id, sug, false);
+      }
+      
+      if(onNavigateToBuilder) onNavigateToBuilder(targetVersion.version_id);
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message);
+    } finally {
+      setApplyingToDraft(false);
+    }
+  };
 
   if (!careerTwin) {
     return (
@@ -29,379 +102,288 @@ export default function ResumeCoach({ careerTwin, handoffPayload, onClearHandoff
     );
   }
 
-  const handleGenerateRewrite = async () => {
-    if (!handoffPayload) return;
-    setLoading(true);
-    setErrorMsg(null);
-
-    try {
-      const payload = {
-        candidate_id: handoffPayload.candidate_id || careerTwin.candidate_id,
-        requirement_id: handoffPayload.requirement_id,
-        requirement_text: handoffPayload.requirement_text,
-        target_role: handoffPayload.target_role,
-        priority: handoffPayload.priority || "REQUIRED",
-        gap_type: handoffPayload.gap_type || "RESUME_VISIBILITY_GAP",
-        evidence_ids: handoffPayload.evidence_ids || [],
-        existing_evidence_snippets: handoffPayload.existing_evidence_snippets || [],
-        missing_elements: handoffPayload.missing_elements || [],
-        current_resume_text: handoffPayload.existing_evidence_snippets?.[0] || "",
-        action_prompt: handoffPayload.action_prompt || ""
-      };
-
-      const res = await fetch('/api/coach/resume-coach', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Server error (${res.status})`);
-      }
-
-      const data = await res.json();
-      setRewriteResult(data);
-    } catch (err) {
-      setErrorMsg(err.message || 'Failed to generate resume rewrite.');
-    } finally {
-      setLoading(false);
-    }
+  const metrics = {
+    total: items.length,
+    visibility: items.filter(i => i.gap_type === 'RESUME_VISIBILITY_GAP').length,
+    experience: items.filter(i => i.gap_type === 'EXPERIENCE_GAP').length,
+    aiImprovements: Object.values(results).filter(r => r.status === 'ACCEPTED').length
   };
 
-  const handleAcceptSuggestion = async () => {
-    if (!rewriteResult || rewriteResult.status !== 'ACCEPTED') return;
-    setApplyingToDraft(true);
-    setErrorMsg(null);
-    try {
-      // 1. Get or create draft version
-      const versions = await coachApi.getResumeVersions(careerTwin.candidate_id);
-      let targetVersion = versions.find(v => v.status === 'DRAFT');
-      if (!targetVersion) {
-        const targetTitle = handoffPayload?.target_role 
-          ? `${handoffPayload.target_role} — Targeted Resume` 
-          : "Targeted Resume Draft";
-        targetVersion = await coachApi.createResumeVersion(
-          careerTwin.candidate_id, 
-          targetTitle, 
-          handoffPayload?.target_role || null
-        );
-      }
-      
-      // 2. Apply suggestion with server-side evidence-lock verification
-      const applied = await coachApi.applySuggestionToVersion(
-        targetVersion.version_id,
-        rewriteResult,
-        false
-      );
-      setAccepted(true);
-      setAppliedVersion(applied);
-    } catch (err) {
-      console.error("Failed to apply suggestion to draft:", err);
-      setErrorMsg(err.message);
-    } finally {
-      setApplyingToDraft(false);
+  const filteredItems = items.filter(item => {
+    if (searchQuery && !item.requirement_text.toLowerCase().includes(searchQuery.toLowerCase())) {
+      return false;
     }
-  };
+    const res = results[item.requirement_id];
+    if (filter === 'ALL') return true;
+    if (filter === 'AI_IMPROVEMENTS') return res?.status === 'ACCEPTED';
+    if (filter === 'EXPERIENCE_GAPS') return item.gap_type === 'EXPERIENCE_GAP';
+    if (filter === 'REJECTED') return res?.status === 'REJECTED' || res?.status === 'NO_SAFE_REWRITE';
+    return true;
+  });
 
-  const isExperienceGap = handoffPayload?.gap_type === 'EXPERIENCE_GAP';
+  const acceptedCount = Object.values(accepted).filter(Boolean).length;
+  const isGeneratingAny = loadingIds.size > 0;
 
   return (
-    <div className="coach-view-container">
-      <div className="view-title-header">
-        <span className="coach-badge-tag">Phase 4 — Evidence-Locked AI</span>
-        <h2 className="view-main-title">Evidence-Locked Resume Coach</h2>
-        <p className="view-desc">
-          Transform your resume bullet points into high-visibility accomplishments grounded strictly in verified Evidence Vault facts.
-          The coach will never fabricate ungrounded skills, technologies, or metrics.
-        </p>
+    <div className="rc-container">
+      {/* 1. PAGE HEADER */}
+      <header className="rc-header">
+        <div className="rc-header-content">
+          <div className="rc-header-main">
+            <span className="rc-badge-phase">PHASE 4</span>
+            <h1 className="rc-title">Evidence-Locked AI Resume Coach</h1>
+            <p className="rc-subtitle">Turn your existing experience into stronger, job-targeted resume language — without inventing anything.</p>
+          </div>
+          <div className="rc-header-target">
+            <div className="rc-target-card">
+              <div className="rc-target-label">Target Role</div>
+              <div className="rc-target-value">{handoffPayload?.target_role || 'General Frontend / Full Stack'}</div>
+            </div>
+            <button className="rc-btn-primary" onClick={handleBulkGenerateAll} disabled={isGeneratingAny}>
+              ✨ Generate AI Improvements
+            </button>
+            <div className="rc-validation-note">AI suggestions are always validated against your Evidence Vault.</div>
+          </div>
+        </div>
+      </header>
+
+      {/* 2. JOB ALIGNMENT SUMMARY */}
+      <div className="rc-summary-cards">
+        <div className="rc-summary-card">
+          <div className="rc-summary-value">{metrics.total}</div>
+          <div className="rc-summary-label">Requirements analyzed</div>
+        </div>
+        <div className="rc-summary-card">
+          <div className="rc-summary-value">{metrics.visibility}</div>
+          <div className="rc-summary-label">Visibility gaps</div>
+        </div>
+        <div className="rc-summary-card">
+          <div className="rc-summary-value">{metrics.experience}</div>
+          <div className="rc-summary-label">Experience gaps</div>
+        </div>
+        <div className="rc-summary-card rc-summary-highlight">
+          <div className="rc-summary-value">{metrics.aiImprovements}</div>
+          <div className="rc-summary-label">AI improvements</div>
+        </div>
       </div>
 
-      {/* Target Requirement Optimization Card from Job Fit */}
-      {handoffPayload && (
-        <div className="handoff-optimization-card">
-          <div className="opt-card-header">
-            <div>
-              <span className={`gap-badge ${isExperienceGap ? 'badge-exp-gap' : 'badge-vis-gap'}`}>
-                {handoffPayload.gap_type || 'RESUME_VISIBILITY_GAP'}
-              </span>
-              <h3 className="opt-requirement-title">
-                Target Requirement: "{handoffPayload.requirement_text}"
-              </h3>
-            </div>
-            {onClearHandoff && (
-              <button className="btn-text-dismiss" onClick={onClearHandoff}>
-                ✕ Dismiss Target
-              </button>
-            )}
-          </div>
-
-          <div className="opt-meta-grid">
-            <div className="opt-meta-item">
-              <span className="opt-meta-label">Target Role</span>
-              <span className="opt-meta-val">{handoffPayload.target_role || 'Target Role'}</span>
-            </div>
-            <div className="opt-meta-item">
-              <span className="opt-meta-label">Status</span>
-              <span className={`opt-meta-val status-${(handoffPayload.status || 'PARTIAL').toLowerCase()}`}>
-                {handoffPayload.status || 'PARTIAL'}
-              </span>
-            </div>
-            <div className="opt-meta-item">
-              <span className="opt-meta-label">Priority</span>
-              <span className="opt-meta-val">{handoffPayload.priority || 'REQUIRED'}</span>
-            </div>
-          </div>
-
-          {/* MODE B: EXPERIENCE GAP (Not Rewriteable) */}
-          {isExperienceGap ? (
-            <div className="experience-gap-alert-box">
-              <div className="alert-icon">🚫</div>
-              <div className="alert-body">
-                <h4>Resume Rewriting Unavailable for Experience Gaps</h4>
-                <p className="alert-lead">
-                  Resume rewriting is unavailable because no verified evidence supports this requirement in your Evidence Vault.
-                </p>
-                <div className="gap-guidance-grid">
-                  <div className="guidance-col">
-                    <strong>WHAT IS MISSING:</strong>
-                    <p>{handoffPayload.missing_elements?.join(', ') || handoffPayload.requirement_text}</p>
-                  </div>
-                  <div className="guidance-col">
-                    <strong>WHY:</strong>
-                    <p>No verifiable hands-on evidence exists in your uploaded resume history.</p>
-                  </div>
-                  <div className="guidance-col">
-                    <strong>WHAT YOU CAN DO INSTEAD:</strong>
-                    <p>Gain genuine project or professional experience with this technology before adding it to your resume.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* MODE A: RESUME VISIBILITY GAP (Rewriteable) */
-            <div className="visibility-gap-editor-area">
-              <div className="verified-evidence-box">
-                <span className="box-section-tag">VERIFIED EVIDENCE IN VAULT</span>
-                {handoffPayload.existing_evidence_snippets?.length > 0 ? (
-                  handoffPayload.existing_evidence_snippets.map((snip, sIdx) => (
-                    <p key={sIdx} className="evidence-snippet-line">"{snip}"</p>
-                  ))
-                ) : (
-                  <p className="evidence-snippet-line">
-                    Verified background exists in {handoffPayload.target_role}.
-                  </p>
-                )}
-                {handoffPayload.evidence_ids?.length > 0 && (
-                  <div className="evidence-ids-strip">
-                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#4338CA' }}>Grounding Citations:</span>
-                    {handoffPayload.evidence_ids.map(id => (
-                      <span key={id} className="handoff-citation-pill">{id}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {handoffPayload.action_prompt && (
-                <div className="action-guidance-pill">
-                  💡 <strong>Coach Guidance:</strong> {handoffPayload.action_prompt}
-                </div>
-              )}
-
-              {/* Action Trigger */}
-              {!rewriteResult && !loading && (
-                <div className="generate-action-bar">
-                  <button className="btn-coach-generate" onClick={handleGenerateRewrite}>
-                    ✨ Generate Evidence-Locked Improvement
-                  </button>
-                </div>
-              )}
-
-              {loading && (
-                <div className="coach-generating-loader">
-                  <div className="spinner"></div>
-                  <span>Analyzing Evidence Vault & producing grounded rewrite...</span>
-                </div>
-              )}
-
-              {errorMsg && (
-                <div className="coach-error-banner">
-                  ⚠️ {errorMsg}
-                </div>
-              )}
-
-              {/* Rewrite Result Display */}
-              {rewriteResult && (
-                <div className="rewrite-result-card">
-                  {/* Trust Signals Banner */}
-                  <div className={`trust-banner trust-${rewriteResult.status.toLowerCase()}`}>
-                    {rewriteResult.status === 'ACCEPTED' && (
-                      <>
-                        <span className="trust-icon">✓</span>
-                        <div className="trust-text">
-                          <strong>Evidence verified</strong>
-                          <span>All claims strictly grounded in Evidence Vault citations.</span>
-                        </div>
-                      </>
-                    )}
-                    {rewriteResult.status === 'REJECTED' && (
-                      <>
-                        <span className="trust-icon">⚠</span>
-                        <div className="trust-text">
-                          <strong>Unsupported claim detected</strong>
-                          <span>Rewriter proposed claims not verified by your Evidence Vault. Modification rejected.</span>
-                        </div>
-                      </>
-                    )}
-                    {rewriteResult.status === 'NO_SAFE_REWRITE' && (
-                      <>
-                        <span className="trust-icon">ⓘ</span>
-                        <div className="trust-text">
-                          <strong>No evidence-backed rewrite available</strong>
-                          <span>{rewriteResult.explanation}</span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Side-by-Side Comparison */}
-                  {rewriteResult.suggested_text && (
-                    <div className="comparison-container">
-                      <div className="comparison-pane pane-original">
-                        <span className="pane-label">CURRENT RESUME WORDING</span>
-                        <p className="pane-text">{rewriteResult.original_text || 'Original description'}</p>
-                      </div>
-                      <div className={`comparison-pane pane-suggested ${rewriteResult.status === 'ACCEPTED' ? 'pane-accepted' : 'pane-rejected'}`}>
-                        <span className="pane-label">
-                          {rewriteResult.status === 'ACCEPTED' ? 'EVIDENCE-LOCKED SUGGESTION' : 'PROPOSED (REJECTED)'}
-                        </span>
-                        <p className="pane-text">{rewriteResult.suggested_text}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Changes & Audit Rationale */}
-                  {rewriteResult.changes?.length > 0 && (
-                    <div className="changes-audit-box">
-                      <span className="audit-label">Editorial Improvements (Zero Fact Fabrication):</span>
-                      <ul className="changes-list">
-                        {rewriteResult.changes.map((ch, idx) => (
-                          <li key={idx}>✓ {ch}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Unsupported Claims Warnings if Rejected */}
-                  {rewriteResult.unsupported_claims?.length > 0 && (
-                    <div className="unsupported-claims-alert">
-                      <span className="audit-label">Validation Failures Prevented:</span>
-                      <ul className="unsupported-list">
-                        {rewriteResult.unsupported_claims.map((uc, idx) => (
-                          <li key={idx}>✕ {uc}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Evidence Used Audit Trail */}
-                  {rewriteResult.evidence_used?.length > 0 && (
-                    <div className="evidence-used-trail">
-                      <span className="audit-label">Grounded In Evidence Citations:</span>
-                      <div className="citations-chip-row">
-                        {rewriteResult.evidence_used.map((ev, idx) => (
-                          <div key={idx} className="evidence-used-chip" title={ev.source_text}>
-                            <strong>{ev.evidence_id}</strong>
-                            <span>{ev.source_section || 'Experience'} (p. {ev.page_number || 1})</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Interactive Action Buttons */}
-                  <div className="rewrite-actions-row">
-                    {rewriteResult.status === 'ACCEPTED' && !accepted && (
-                      <button 
-                        className="btn-accept-suggestion" 
-                        onClick={handleAcceptSuggestion}
-                        disabled={applyingToDraft}
-                      >
-                        {applyingToDraft ? 'Validating & Applying...' : '✓ Accept Suggestion'}
-                      </button>
-                    )}
-                    {accepted && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', width: '100%', marginBottom: '0.5rem' }}>
-                        <span className="accepted-confirmation-tag">
-                          ✓ Suggestion Validated & Applied to Resume Draft {appliedVersion?.title ? `("${appliedVersion.title}")` : ''}
-                        </span>
-                        {onNavigateToBuilder && (
-                          <button 
-                            className="btn-accent"
-                            style={{ alignSelf: 'flex-start', padding: '0.45rem 0.9rem', fontSize: '0.85rem' }}
-                            onClick={() => onNavigateToBuilder(appliedVersion?.version_id)}
-                          >
-                            📄 Open Resume Draft & View Diff →
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    <button className="btn-regenerate" onClick={handleGenerateRewrite} disabled={applyingToDraft}>
-                      ⟳ Regenerate
-                    </button>
-                    <button className="btn-keep-original" onClick={() => setRewriteResult(null)} disabled={applyingToDraft}>
-                      Keep Original
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+      {/* 11. GENERATION STATE (Global) */}
+      {isGeneratingAny && (
+        <div className="rc-global-loader">
+          <div className="rc-spinner"></div>
+          <span>✨ Analyzing your resume against the target role...</span>
         </div>
       )}
+      {errorMsg && <div className="rc-error-banner">{errorMsg}</div>}
 
-      {/* Baseline Diagnostic Section (Auditing all experience bullets) */}
-      <div className="coach-feature-card">
-        <div className="feature-top-bar">
-          <div>
-            <span className="badge-pill">Baseline Experience Audit</span>
-            <h3>Bullet Point Health & Impact Diagnostic</h3>
-          </div>
-          <span className="status-pill-ready">● Engine Ready</span>
+      {/* 3. FILTER BAR */}
+      <div className="rc-filter-bar">
+        <div className="rc-filter-tabs">
+          <button className={`rc-tab ${filter === 'ALL' ? 'active' : ''}`} onClick={() => setFilter('ALL')}>All</button>
+          <button className={`rc-tab ${filter === 'AI_IMPROVEMENTS' ? 'active' : ''}`} onClick={() => setFilter('AI_IMPROVEMENTS')}>AI Improvements</button>
+          <button className={`rc-tab ${filter === 'EXPERIENCE_GAPS' ? 'active' : ''}`} onClick={() => setFilter('EXPERIENCE_GAPS')}>Experience Gaps</button>
+          <button className={`rc-tab ${filter === 'REJECTED' ? 'active' : ''}`} onClick={() => setFilter('REJECTED')}>Rejected / Unsafe</button>
         </div>
-        <p className="feature-desc">
-          Audit of existing experience descriptions. All suggestions remain bounded to facts indexed in your Evidence Vault.
-        </p>
-
-        {/* Experience Bullets Preview */}
-        <div className="bullets-audit-list">
-          {careerTwin.experience?.map((exp, eIdx) => (
-            <div key={eIdx} className="bullet-group-card">
-              <h4 className="bullet-role-heading">{exp.role} at {exp.company}</h4>
-              <p className="bullet-dates">{exp.start_date} - {exp.end_date || 'Present'}</p>
-              
-              <div className="bullet-lines">
-                {exp.description ? (
-                  exp.description.split('\n').filter(l => l.trim().length > 10).map((line, lIdx) => (
-                    <div key={lIdx} className="bullet-line-item">
-                      <span className="bullet-dot">•</span>
-                      <div className="bullet-content">
-                        <p>{line.replace(/^[•\-*]\s*/, '')}</p>
-                        <div className="bullet-tags">
-                          <span className="pill-tag">Verified Fact</span>
-                          {line.match(/\d+/) && <span className="pill-tag tag-metric">Quantified</span>}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="bullet-empty">No detailed description lines extracted.</p>
-                )}
-              </div>
-            </div>
-          ))}
+        <div className="rc-search-box">
+          <input 
+            type="text" 
+            placeholder="Search requirements..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="rc-search-input"
+          />
         </div>
       </div>
+
+      {/* 4. REQUIREMENT CARDS LIST */}
+      <div className="rc-cards-list">
+        {filteredItems.map(item => {
+          const isExpGap = item.gap_type === 'EXPERIENCE_GAP';
+          const isLoading = loadingIds.has(item.requirement_id);
+          const res = results[item.requirement_id];
+          const isAccepted = accepted[item.requirement_id];
+
+          return (
+            <div key={item.requirement_id} className={`rc-card ${isAccepted ? 'rc-card-accepted' : ''}`}>
+              
+              {/* Card Header */}
+              <div className="rc-card-header">
+                <span className={`rc-gap-badge ${isExpGap ? 'rc-gap-exp' : 'rc-gap-vis'}`}>
+                  {isExpGap ? '🎯 EXPERIENCE GAP' : 'RESUME VISIBILITY GAP'}
+                </span>
+                <h3 className="rc-req-title">{item.requirement_text}</h3>
+              </div>
+
+              {/* 9. EXPERIENCE GAP (No AI rewrite) */}
+              {isExpGap ? (
+                <div className="rc-exp-gap-content">
+                  <p className="rc-exp-msg">This requirement isn't currently supported by verified evidence in your Evidence Vault.</p>
+                  <div className="rc-exp-next-steps">
+                    <strong>Recommended next steps:</strong>
+                    <div className="rc-exp-actions">
+                      <button className="rc-btn-outline">Learn this skill</button>
+                      <button className="rc-btn-outline">Build a project</button>
+                      <button className="rc-btn-outline">Document evidence</button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rc-vis-gap-content">
+                  
+                  {/* Generation State per card */}
+                  {isLoading ? (
+                    <div className="rc-card-loader">
+                      <div className="rc-spinner-small"></div>
+                      <div className="rc-loader-steps">
+                        <span>Analyzing requirement...</span>
+                        <span>Retrieving verified evidence...</span>
+                        <span>Generating rewrite...</span>
+                        <span>Validating claims...</span>
+                      </div>
+                    </div>
+                  ) : !res ? (
+                    <div className="rc-pre-gen">
+                      <div className="rc-section-label">CURRENT RESUME</div>
+                      <p className="rc-text-block">{cleanBulletText(item.existing_evidence_snippets?.[0]) || 'No matching excerpt found.'}</p>
+                      <div className="rc-card-actions">
+                        <button className="rc-btn-secondary" onClick={() => handleGenerateRewrite(item)}>✨ Generate AI Improvement</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rc-post-gen">
+                      
+                      {/* 12. ACCEPTED STATE */}
+                      {isAccepted ? (
+                        <div className="rc-accepted-state">
+                          <div className="rc-accepted-header">
+                            <span className="rc-accepted-title">✓ Suggestion accepted</span>
+                            <span className="rc-evidence-badge">Evidence validated</span>
+                          </div>
+                          <div className="rc-diff-view">
+                            <div className="rc-diff-original">
+                              <span className="rc-diff-label">Original</span>
+                              <p>{cleanBulletText(res.original_text)}</p>
+                            </div>
+                            <div className="rc-diff-arrow">→</div>
+                            <div className="rc-diff-updated">
+                              <span className="rc-diff-label">Updated</span>
+                              <p>{cleanBulletText(res.suggested_text)}</p>
+                            </div>
+                          </div>
+                          <div className="rc-card-actions">
+                            <button className="rc-btn-text" onClick={() => handleGenerateRewrite(item)}>↻ Regenerate</button>
+                            <button className="rc-btn-text" onClick={() => setAccepted(prev => ({...prev, [item.requirement_id]: false}))}>Undo</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {/* AI SUGGESTION AREA or REJECTIONS */}
+                          {res.status === 'ACCEPTED' && (
+                            <div className="rc-suggestion-panel">
+                              <div className="rc-comparison">
+                                <div className="rc-comp-side">
+                                  <div className="rc-section-label">CURRENT RESUME</div>
+                                  <p className="rc-text-block">{cleanBulletText(res.original_text)}</p>
+                                </div>
+                                <div className="rc-comp-side rc-comp-suggested">
+                                  <div className="rc-section-label-ai">✨ AI SUGGESTION</div>
+                                  <p className="rc-text-block">{cleanBulletText(res.suggested_text)}</p>
+                                </div>
+                              </div>
+                              <div className="rc-rationale">
+                                <strong>Why this helps</strong>
+                                <p>{res.explanation}</p>
+                              </div>
+                              <div className="rc-evidence">
+                                <strong>Evidence</strong>
+                                <div className="rc-evidence-chips">
+                                  {res.evidence_used?.map((ev, idx) => (
+                                    <div key={idx} className="rc-chip" title={`${ev.source_text} (${ev.evidence_id})`}>
+                                      {ev.evidence_id.substring(0, 8)}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              
+                              {/* 6. ACTION BUTTONS */}
+                              <div className="rc-card-actions rc-card-actions-right">
+                                <button className="rc-btn-text" onClick={() => setResults(prev => { const n = {...prev}; delete n[item.requirement_id]; return n; })}>Keep Original</button>
+                                <button className="rc-btn-secondary" onClick={() => handleGenerateRewrite(item)}>↻ Regenerate</button>
+                                <button className="rc-btn-primary" onClick={() => setAccepted(prev => ({...prev, [item.requirement_id]: true}))}>✓ Accept Suggestion</button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 7. REJECTED / UNSAFE STATE */}
+                          {res.status === 'REJECTED' && (
+                            <div className="rc-rejected-panel">
+                              <div className="rc-rejected-header">
+                                <span className="rc-warn-icon">⚠️</span>
+                                <h4>AI suggestion blocked</h4>
+                              </div>
+                              <p className="rc-warn-msg">Vettora found claims that could not be verified against your Evidence Vault.</p>
+                              
+                              <details className="rc-rejected-details">
+                                <summary>Unsupported claims detected: {res.unsupported_claims?.length || 0} <span className="rc-view-details">[ View details ]</span></summary>
+                                <div className="rc-details-content">
+                                  <p className="rc-backend-reason">{res.explanation}</p>
+                                  <ul>
+                                    {res.unsupported_claims?.map((uc, i) => <li key={i}>{uc}</li>)}
+                                  </ul>
+                                </div>
+                              </details>
+
+                              <div className="rc-card-actions">
+                                <button className="rc-btn-secondary" onClick={() => handleGenerateRewrite(item)}>↻ Regenerate</button>
+                                <button className="rc-btn-text" onClick={() => setResults(prev => { const n = {...prev}; delete n[item.requirement_id]; return n; })}>Keep Original</button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 8. NO_SAFE_REWRITE */}
+                          {res.status === 'NO_SAFE_REWRITE' && (
+                            <div className="rc-no-rewrite-panel">
+                              <div className="rc-shield-header">
+                                <span className="rc-shield-icon">🛡</span>
+                                <h4>No safe rewrite available</h4>
+                              </div>
+                              <p className="rc-shield-msg">Vettora couldn't produce a stronger version without risking unsupported claims.</p>
+                              <div className="rc-card-actions">
+                                <button className="rc-btn-secondary" onClick={() => handleGenerateRewrite(item)}>↻ Regenerate</button>
+                                <button className="rc-btn-text" onClick={() => setResults(prev => { const n = {...prev}; delete n[item.requirement_id]; return n; })}>Keep Original</button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {filteredItems.length === 0 && (
+          <div className="rc-empty-filter">No requirements match the current filter.</div>
+        )}
+      </div>
+
+      {/* 10. BULK ACTION BAR */}
+      {isBulk && acceptedCount > 0 && (
+        <div className="rc-sticky-action-bar">
+          <div className="rc-sticky-content">
+            <span className="rc-sticky-text">{acceptedCount} AI improvements accepted</span>
+            <div className="rc-sticky-actions">
+              <button className="rc-btn-secondary" onClick={handleBulkGenerateAll} disabled={isGeneratingAny}>
+                Generate All
+              </button>
+              <button className="rc-btn-primary" onClick={handleCreateTailoredVersion} disabled={applyingToDraft}>
+                {applyingToDraft ? 'Applying...' : 'Create Tailored Resume Version'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

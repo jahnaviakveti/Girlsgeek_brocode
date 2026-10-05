@@ -1,0 +1,39 @@
+Created At: 2026-10-04T17:10:35+05:30
+Completed At: 2026-10-04T17:10:35+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2107
+Total Bytes: 77770
+Showing lines 1125 to 1155
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1125:  
+1126: @router.get(
+1127:     "/career-targets/{target_id}/progress",
+1128:     response_model=TargetProgressComparison,
+1129:     summary="Get Career Target Before/After Progress",
+1130:     description="Computes before/after requirement progress comparison and chronological timeline."
+1131: )
+1132: def get_career_target_progress(
+1133:     target_id: str,
+1134:     candidate_id: str = Query(..., description="Candidate ID for tenancy check"),
+1135:     db: Session = Depends(get_db)
+1136: ) -> TargetProgressComparison:
+1137:     try:
+1138:         twin = _get_or_load_twin(candidate_id, db)
+1139:         vault = _get_or_load_vault(candidate_id, db)
+1140:         return _career_execution_service.get_target_progress(
+1141:             target_id=target_id,
+1142:             candidate_id=candidate_id,
+1143:             twin=twin,
+1144:             vault=vault,
+1145:             db=db,
+1146:         )
+1147:     except PermissionError as exc:
+1148:         raise HTTPException(status_code=403, detail=str(exc))
+1149:     except ValueError as exc:
+1150:         raise HTTPException(status_code=404, detail=str(exc))
+1151: 
+1152: @router.get(
+1153:     "/career-targets/{candidate_id}/{target_id}",
+1154:     response_model=CareerTarget,
+1155:     status_code=status.HTTP_200_OK,
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

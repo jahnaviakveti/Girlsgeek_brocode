@@ -1,0 +1,108 @@
+Created At: 2026-10-04T16:51:33+05:30
+Completed At: 2026-10-04T16:51:33+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2102
+Total Bytes: 77466
+Showing lines 1 to 100
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import os
+2: import re
+3: import json
+4: import shutil
+5: import tempfile
+6: import uuid
+7: from pathlib import Path
+8: from typing import Optional, Dict, List, Any
+9: 
+10: from fastapi import APIRouter, UploadFile, File, Form, Query, HTTPException, Depends, status, Response, Header
+11: from pydantic import BaseModel
+12: from sqlalchemy.orm import Session
+13: 
+14: from app.schemas.coach_api import (
+15:     ResumeUploadResponse,
+16:     JobFitAnalysisResponse,
+17:     CareerTwinQueryRequest,
+18:     CareerTwinQueryResponse,
+19:     EvidenceQueryResponse,
+20:     ResumeCoachRequest,
+21:     ResumeCoachResponse,
+22: )
+23: from app.schemas.career_twin import CareerTwin
+24: from app.schemas.evidence_vault import EvidenceVault, VaultEvidenceItem, ClaimValidationResult
+25: from app.schemas.candidate import CandidateProfile
+26: from app.schemas.resume_version import (
+27:     ResumeVersion,
+28:     ResumeVersionSummary,
+29:     CreateVersionRequest,
+30:     CloneVersionRequest,
+31:     ApplySuggestionRequest,
+32:     ApplySuggestionResponse,
+33:     ResumeVersionDiffResponse,
+34:     JobFitRecheckRequest,
+35:     JobFitRecheckResponse,
+36:     ResumeSection,
+37:     AcceptedSuggestion,
+38:     ResumeVersionStatus,
+39: )
+40: from app.schemas.career_intelligence import (
+41:     TargetStatus,
+42:     GapPriority,
+43:     ActionType,
+44:     ActionStatus,
+45:     CareerTarget,
+46:     CareerTargetSummary,
+47:     CareerStrength,
+48:     RequirementGap,
+49:     CareerAction,
+50:     ProgressSummary,
+51:     CareerIntelligenceResponse,
+52:     CreateCareerTargetRequest,
+53:     CreateCareerActionRequest,
+54: )
+55: from app.services.document_parser import DocumentParser
+56: from app.services.resume_analyzer import ResumeAnalyzer
+57: from app.services.jd_analyzer import JDAnalyzer
+58: from app.services.coach.career_twin import CareerTwinService
+59: from app.services.coach.evidence import EvidenceVaultService, EvidenceValidationService
+60: from app.services.coach.job_fit import JobFitService
+61: from app.services.coach.ats import ATSStressTestService
+62: from app.services.coach.resume import ResumeCoachService
+63: from app.services.coach.resume_builder import ResumeBuilderService
+64: from app.services.coach.career_intelligence import CareerIntelligenceService
+65: from app.schemas.interview_readiness import (
+66:     InterviewTargetStatus,
+67:     PreparationStatus,
+68:     QuestionType,
+69:     ValidationVerdict,
+70:     InterviewTarget,
+71:     InterviewRequirementMapItem,
+72:     InterviewQuestion,
+73:     ProjectStory,
+74:     AnswerValidationResult,
+75:     InterviewSession,
+76:     InterviewSessionItem,
+77:     InterviewReadinessResponse,
+78:     CreateInterviewTargetRequest,
+79:     ValidateAnswerRequest,
+80:     CreateInterviewSessionRequest,
+81:     SubmitSessionAnswerRequest,
+82: )
+83: from app.services.coach.interview import (
+84:     InterviewReadinessService,
+85:     InterviewAnswerCoachService,
+86:     InterviewQuestionService,
+87: )
+88: from app.schemas.career_execution import (
+89:     CareerExecution,
+90:     ExecutionStatus,
+91:     ProgressState,
+92:     ArtifactType,
+93:     ArtifactReference,
+94:     ExecutionNote,
+95:     EvidenceClaimSubmission,
+96:     EvidenceVerificationResult,
+97:     RequirementProgressItem,
+98:     TimelineEventType,
+99:     TimelineEvent,
+100:     TargetRequirementDelta,
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

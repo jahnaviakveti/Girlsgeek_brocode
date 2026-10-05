@@ -1128,3 +1128,52 @@ def test_full_manual_e2e_26_step_flow(candidate_alex, career_intelligence_servic
     # Step 26: Verify no fabricated skill appears anywhere
     assert not any("solidity" in s.requirement_text.lower() for s in final_intel.strengths)
     assert not any("blockchain" in s.requirement_text.lower() for s in final_intel.strengths)
+
+
+# ---------------------------------------------------------------------------
+# 35. Evidence Coverage Percentage Formatting Regression (0.659 -> 65.9%)
+# ---------------------------------------------------------------------------
+def test_35_evidence_coverage_percentage_formatting_0_659(candidate_alex, career_intelligence_service, db_session):
+    from app.services.coach.career_intelligence.service import (
+        normalize_coverage_to_percentage,
+        format_coverage_percentage,
+    )
+    twin, vault = candidate_alex
+
+    # 1. Direct regression test: 0.659 must convert to 65.9%, NEVER 6590.0%
+    assert normalize_coverage_to_percentage(0.659) == 65.9
+    assert format_coverage_percentage(0.659) == "65.9%"
+    assert format_coverage_percentage(0.659) != "6590.0%"
+    assert format_coverage_percentage(0.659) != "6590%"
+
+    # 2. Test when previous_coverage is decimal 0.50 and current is 0.659
+    target = career_intelligence_service.create_target(
+        candidate_id=twin.candidate_id,
+        target_role="Full Stack Developer",
+        job_description_text="Requirements:\n- Python\n- React\n",
+        db=db_session
+    )
+    original_eval = career_intelligence_service.job_fit_service.evaluate_fit
+
+    class MockFitRes:
+        job_fit_analysis = None
+        evidence_coverage = 0.659
+        fit_score = 65.9
+
+    career_intelligence_service.job_fit_service.evaluate_fit = lambda **kwargs: MockFitRes()
+    try:
+        intel = career_intelligence_service.analyze_target_intelligence(
+            target=target,
+            twin=twin,
+            vault=vault,
+            db=db_session,
+            previous_coverage=0.50
+        )
+        assert intel.evidence_coverage == 65.9
+        assert intel.progress_summary.previous_evidence_coverage == 50.0
+        assert intel.progress_summary.coverage_delta == 15.9
+        assert "65.9%" in intel.progress_summary.narrative
+        assert "6590" not in intel.progress_summary.narrative
+    finally:
+        career_intelligence_service.job_fit_service.evaluate_fit = original_eval
+

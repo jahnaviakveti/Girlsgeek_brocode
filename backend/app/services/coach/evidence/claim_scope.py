@@ -205,3 +205,36 @@ def extract_operational_scope_claims(text: str) -> List[str]:
             claims.append(m.group(0))
 
     return claims
+
+
+def classify_claim_scope(text: str) -> str:
+    """
+    Deterministically assigns one of the 5 claim levels:
+    LEVEL 1 — TECHNOLOGY PRESENCE
+    LEVEL 2 — USAGE
+    LEVEL 3 — IMPLEMENTATION
+    LEVEL 4 — OPERATIONAL / PRODUCTION
+    LEVEL 5 — SPECIFIC SCOPE
+    """
+    if not text:
+        return "LEVEL 1 — TECHNOLOGY PRESENCE"
+    t_lower = text.lower()
+
+    # Level 5: Specific / Multi-region enterprise scope
+    if any(w in t_lower for w in ["multi-region", "multi-cluster", "cross-region", "global infrastructure", "disaster recovery architecture"]):
+        return "LEVEL 5 — SPECIFIC SCOPE"
+
+    # Level 4: Operational / Production
+    if any(w in t_lower for w in ["production", "on-call", "sre", "cluster management", "managed production", "eks cluster", "gke cluster", "aks cluster", "cluster administration", "incident response"]):
+        return "LEVEL 4 — OPERATIONAL / PRODUCTION"
+
+    # Level 3: Implementation / Deployment / Configuration
+    if any(w in t_lower for w in ["configured", "implemented", "authored", "helm", "manifest", "deploy", "deployed", "deployment", "service", "ingress", "pipeline", "dockerfile", "docker compose", "schema", "resolver", "rest api", "endpoints", "fastapi", "flask", "caching", "cache"]):
+        return "LEVEL 3 — IMPLEMENTATION"
+
+    # Level 2: Usage
+    if any(w in t_lower for w in ["used", "using", "utilized", "worked with", "familiar with", "exposure"]):
+        return "LEVEL 2 — USAGE"
+
+    # Level 1: Presence
+    return "LEVEL 1 — TECHNOLOGY PRESENCE"

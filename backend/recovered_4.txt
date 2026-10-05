@@ -1,0 +1,118 @@
+Created At: 2026-10-04T16:24:17+05:30
+Completed At: 2026-10-04T16:24:17+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2102
+Total Bytes: 77466
+Showing lines 1061 to 1170
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1061:     "/career-targets",
+1062:     response_model=CareerTarget,
+1063:     status_code=status.HTTP_201_CREATED,
+1064:     summary="Create Career Target",
+1065:     description="Creates and persists a target role/company goal for the candidate."
+1066: )
+1067: def create_career_target(
+1068:     payload: CreateCareerTargetRequest,
+1069:     db: Session = Depends(get_db)
+1070: ) -> CareerTarget:
+1071:     twin = _get_or_load_twin(payload.candidate_id, db)
+1072:     if not twin:
+1073:         raise HTTPException(
+1074:             status_code=404,
+1075:             detail=f"Candidate '{payload.candidate_id}' not found. Please upload resume first."
+1076:         )
+1077: 
+1078:     vault = _get_or_load_vault(payload.candidate_id, db)
+1079:     target = _career_intelligence_service.create_target(
+1080:         candidate_id=payload.candidate_id,
+1081:         target_role=payload.target_role,
+1082:         target_company=payload.target_company,
+1083:         source_job_fit_id=payload.source_job_fit_id,
+1084:         job_description_text=payload.job_description_text,
+1085:         twin=twin,
+1086:         vault=vault,
+1087:         db=db
+1088:     )
+1089:     _persist_target(target, db)
+1090:     return target
+1091: 
+1092: @router.get(
+1093:     "/career-targets/{candidate_id}",
+1094:     response_model=List[CareerTargetSummary],
+1095:     status_code=status.HTTP_200_OK,
+1096:     summary="List Career Targets",
+1097:     description="Returns all career targets associated with the candidate."
+1098: )
+1099: def list_career_targets(
+1100:     candidate_id: str,
+1101:     status_filter: Optional[str] = Query(None, alias="status"),
+1102:     db: Session = Depends(get_db)
+1103: ) -> List[CareerTargetSummary]:
+1104:     repo = Repository(db)
+1105:     records = repo.get_career_targets_for_candidate(candidate_id, status=status_filter)
+1106:     summaries = []
+1107:     for r in records:
+1108:         reqs = json.loads(r.requirements_json) if r.requirements_json else []
+1109:         summaries.append(CareerTargetSummary(
+1110:             target_id=r.target_id,
+1111:             candidate_id=r.candidate_id,
+1112:             target_role=r.target_role,
+1113:             target_company=r.target_company,
+1114:             status=TargetStatus(r.status),
+1115:             requirements_count=len(reqs),
+1116:             created_at=r.created_at,
+1117:             updated_at=r.updated_at
+1118:         ))
+1119:     return summaries
+1120:  
+1121: @router.get(
+1122:     "/career-targets/{target_id}/progress",
+1123:     response_model=TargetProgressComparison,
+1124:     summary="Get Career Target Before/After Progress",
+1125:     description="Computes before/after requirement progress comparison and chronological timeline."
+1126: )
+1127: def get_career_target_progress(
+1128:     target_id: str,
+1129:     candidate_id: str = Query(..., description="Candidate ID for tenancy check"),
+1130:     db: Session = Depends(get_db)
+1131: ) -> TargetProgressComparison:
+1132:     try:
+1133:         twin = _get_or_load_twin(candidate_id, db)
+1134:         vault = _get_or_load_vault(candidate_id, db)
+1135:         return _career_execution_service.get_target_progress(
+1136:             target_id=target_id,
+1137:             candidate_id=candidate_id,
+1138:             twin=twin,
+1139:             vault=vault,
+1140:             db=db,
+1141:         )
+1142:     except PermissionError as exc:
+1143:         raise HTTPException(status_code=403, detail=str(exc))
+1144:     except ValueError as exc:
+1145:         raise HTTPException(status_code=404, detail=str(exc))
+1146: 
+1147: @router.get(
+1148:     "/career-targets/{candidate_id}/{target_id}",
+1149:     response_model=CareerTarget,
+1150:     status_code=status.HTTP_200_OK,
+1151:     summary="Get Career Target Detail",
+1152:     description="Returns full details of a specific career target."
+1153: )
+1154: def get_career_target_detail(
+1155:     candidate_id: str,
+1156:     target_id: str,
+1157:     db: Session = Depends(get_db)
+1158: ) -> CareerTarget:
+1159:     target = _get_or_load_target(target_id, db)
+1160:     if not target:
+1161:         raise HTTPException(status_code=404, detail=f"Career target '{target_id}' not found.")
+1162:     if target.candidate_id != candidate_id:
+1163:         raise HTTPException(
+1164:             status_code=403,
+1165:             detail=f"Security violation: Target '{target_id}' does not belong to candidate '{candidate_id}'."
+1166:         )
+1167:     return target
+1168: 
+1169: @router.get(
+1170:     "/career-intelligence/{candidate_id}/{target_id}",
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

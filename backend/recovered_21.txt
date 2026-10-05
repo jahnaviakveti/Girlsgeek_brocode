@@ -1,0 +1,26 @@
+Created At: 2026-10-04T17:19:27+05:30
+Completed At: 2026-10-04T17:19:27+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2143
+Total Bytes: 79500
+Showing lines 1928 to 1945
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1928:                             db=db,
+1929:                         )
+1930:             except Exception:
+1931:                 pass
+1932:         return result
+1933:     except PermissionError as exc:
+1934:         raise HTTPException(status_code=403, detail=str(exc))
+1935:     except ValueError as exc:
+1936:         raise HTTPException(status_code=400, detail=str(exc))
+1937:     except PermissionError as exc:
+1938:         raise HTTPException(status_code=403, detail=str(exc))
+1939:     except ValueError as exc:
+1940:         raise HTTPException(status_code=400, detail=str(exc))
+1941: 
+1942: 
+1943: # =============================================================================
+1944: # PHASE 9: CAREER SHOWCASE & PRODUCTION RELEASE ENDPOINTS
+1945: # =============================================================================
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

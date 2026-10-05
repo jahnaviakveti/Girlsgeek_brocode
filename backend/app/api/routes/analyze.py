@@ -4,7 +4,8 @@ import tempfile
 from pathlib import Path
 from typing import List, Tuple
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from app.core.auth import get_current_user, UserRecord
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
 from app.schemas.api import AnalysisResponse
 from app.services.pipeline import ShortlistingPipeline
 from app.core.exceptions import (
@@ -26,7 +27,8 @@ router = APIRouter()
 )
 async def analyze_candidates(
     jd_file: UploadFile = File(..., description="Single Job Description PDF"),
-    resume_files: List[UploadFile] = File(..., description="Batch of candidate resume PDFs (15-18 expected)")
+    resume_files: List[UploadFile] = File(..., description="Batch of candidate resume PDFs (15-18 expected)"),
+    current_user: UserRecord = Depends(get_current_user)
 ) -> AnalysisResponse:
     # 1. Validate JD file
     if not jd_file or not jd_file.filename:
@@ -67,7 +69,8 @@ async def analyze_candidates(
         temp_dir_path = Path(temp_dir)
 
         # Save JD file
-        jd_path = temp_dir_path / f"jd_{jd_file.filename}"
+        safe_jd_name = Path(jd_file.filename).name
+        jd_path = temp_dir_path / f"jd_{safe_jd_name}"
         with open(jd_path, "wb") as f_out:
             content = await jd_file.read()
             if len(content) == 0:
@@ -80,7 +83,8 @@ async def analyze_candidates(
         # Save resume files
         resume_inputs: List[Tuple[str, Path]] = []
         for idx, r_file in enumerate(resume_files):
-            clean_name = f"resume_{idx}_{r_file.filename}"
+            safe_resume_name = Path(r_file.filename).name
+            clean_name = f"resume_{idx}_{safe_resume_name}"
             r_path = temp_dir_path / clean_name
             with open(r_path, "wb") as f_out:
                 content = await r_file.read()

@@ -1,0 +1,59 @@
+Created At: 2026-10-04T17:14:26+05:30
+Completed At: 2026-10-04T17:14:26+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2107
+Total Bytes: 77770
+Showing lines 1220 to 1270
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1220:     status_code=status.HTTP_200_OK,
+1221:     summary="Refresh Career Intelligence",
+1222:     description="Re-evaluates Job Fit and career gaps with current Career Twin & Evidence Vault data."
+1223: )
+1224: def refresh_career_intelligence(
+1225:     target_id: str,
+1226:     payload: RefreshTargetRequest,
+1227:     db: Session = Depends(get_db)
+1228: ) -> CareerIntelligenceResponse:
+1229:     target = _get_or_load_target(target_id, db)
+1230:     if not target:
+1231:         raise HTTPException(status_code=404, detail=f"Career target '{target_id}' not found.")
+1232:     if target.candidate_id != payload.candidate_id:
+1233:         raise HTTPException(
+1234:             status_code=403,
+1235:             detail=f"Security violation: Target '{target_id}' does not belong to candidate '{payload.candidate_id}'."
+1236:         )
+1237: 
+1238:     twin = _get_or_load_twin(payload.candidate_id, db)
+1239:     if not twin:
+1240:         raise HTTPException(status_code=404, detail=f"Candidate twin for '{payload.candidate_id}' not found.")
+1241: 
+1242:     vault = _get_or_load_vault(payload.candidate_id, db)
+1243:     if not vault:
+1244:         raise HTTPException(status_code=404, detail=f"Evidence vault for '{payload.candidate_id}' not found.")
+1245: 
+1246:     try:
+1247:         return _career_intelligence_service.refresh_target_intelligence(
+1248:             target=target,
+1249:             twin=twin,
+1250:             vault=vault,
+1251:             db=db,
+1252:             previous_coverage=payload.previous_coverage
+1253:         )
+1254:     except PermissionError as exc:
+1255:         raise HTTPException(status_code=403, detail=str(exc))
+1256:     except Exception as exc:
+1257:         raise HTTPException(status_code=500, detail=f"Career intelligence refresh failed: {str(exc)}")
+1258: 
+1259: @router.post(
+1260:     "/career-actions",
+1261:     response_model=CareerAction,
+1262:     status_code=status.HTTP_201_CREATED,
+1263:     summary="Create Career Action",
+1264:     description="Adds a specific task to the candidate's action plan."
+1265: )
+1266: def create_career_action(
+1267:     payload: CreateCareerActionRequest,
+1268:     db: Session = Depends(get_db)
+1269: ) -> CareerAction:
+1270:     action_id = f"act_{uuid.uuid4().hex[:10]}"
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

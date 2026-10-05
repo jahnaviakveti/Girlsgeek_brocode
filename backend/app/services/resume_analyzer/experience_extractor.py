@@ -34,6 +34,21 @@ class ExperienceExtractor:
         if not clean:
             return False
 
+        LINK_LABELS = {
+            "project repo link", "repo link", "repository", "github", "github link", 
+            "project link", "demo link", "live demo", "video demo link", "doi", "publication link",
+            "source code", "link"
+        }
+        
+        t_clean = re.sub(r'[^a-z0-9\s]', '', clean.lower()).strip()
+        if t_clean in LINK_LABELS:
+            return False
+        if "://" in clean or clean.lower().startswith("www."):
+            return False
+        for prefix in ["github", "link", "demo", "repo", "doi", "http", "project repo link"]:
+            if clean.lower().startswith(prefix + ":") or clean.lower().startswith(prefix + " :") or clean.lower().startswith(prefix + "-"):
+                return False
+
         # Has date range
         s_date, e_date, _, _ = parse_date_range(clean)
         if s_date is not None:
@@ -132,7 +147,10 @@ class ExperienceExtractor:
             return []
 
         entries: List[CandidateExperience] = []
-        lines = [l.strip() for l in experience_text.split("\n") if l.strip()]
+        lines = [
+            re.sub(r'^[\u2022\u25cf\u25aa\u25e6\u25cb\u2043\u2219\u2023\u25b8\uf0b7]\s*', '• ', re.sub(r'^\?\s*(?=[A-Za-z0-9])', '• ', l.strip()))
+            for l in experience_text.split("\n") if l.strip()
+        ]
 
         current_role: Optional[str] = None
         current_company: Optional[str] = None

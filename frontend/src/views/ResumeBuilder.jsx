@@ -19,6 +19,7 @@ export default function ResumeBuilder({ careerTwin, selectedVersionId, onNavigat
   const [cloneTitle, setCloneTitle] = useState('');
   const [showCloneModal, setShowCloneModal] = useState(false);
   const [actionSuccess, setActionSuccess] = useState(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   const candidateId = careerTwin?.candidate_id;
 
@@ -53,20 +54,20 @@ export default function ResumeBuilder({ careerTwin, selectedVersionId, onNavigat
     setError(null);
     try {
       const data = await coachApi.getResumeVersions(candidateId);
-      setVersions(data);
-      if (data.length > 0) {
+      const versionList = Array.isArray(data) ? data : [];
+      setVersions(versionList);
+      if (versionList.length > 0) {
         const toSelect = selectId 
-          ? data.find(v => v.version_id === selectId) || data[0]
-          : data[0];
+          ? versionList.find(v => v.version_id === selectId) || versionList[0]
+          : versionList[0];
         await loadVersionDetail(toSelect.version_id);
       } else {
-        const initial = await coachApi.createResumeVersion(candidateId, "Original Uploaded Resume");
-        setVersions([initial]);
-        await loadVersionDetail(initial.version_id);
+        setActiveVersion(null);
+        setDiffData(null);
       }
     } catch (err) {
       console.error("Error loading resume versions:", err);
-      setError(err.message);
+      setError(err.message || "Failed to load resume versions.");
     } finally {
       setLoading(false);
     }
@@ -95,10 +96,15 @@ export default function ResumeBuilder({ careerTwin, selectedVersionId, onNavigat
   };
 
   const handleCloneVersion = async () => {
-    if (!activeVersion) return;
     try {
-      const title = cloneTitle.trim() || `Draft from ${activeVersion.title}`;
-      const newVersion = await coachApi.cloneResumeVersion(activeVersion.version_id, title);
+      let newVersion;
+      if (activeVersion) {
+        const title = cloneTitle.trim() || `Draft from ${activeVersion.title}`;
+        newVersion = await coachApi.cloneResumeVersion(activeVersion.version_id, title);
+      } else {
+        const title = cloneTitle.trim() || "New Resume Draft";
+        newVersion = await coachApi.createResumeVersion(candidateId, title);
+      }
       setShowCloneModal(false);
       setCloneTitle('');
       setActionSuccess(`Created new draft version: "${newVersion.title}"`);
@@ -127,6 +133,28 @@ export default function ResumeBuilder({ careerTwin, selectedVersionId, onNavigat
     }
   };
 
+  const handleExportPdf = async () => {
+    if (!activeVersion || exportLoading) return;
+    setExportLoading(true);
+    setError(null);
+    try {
+      const blob = await coachApi.exportResumeVersionPdf(activeVersion.version_id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${activeVersion.title.replace(/\s+/g, '_')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      setError(err.message || "Failed to export PDF.");
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   if (!careerTwin) {
     return (
       <div className="view-card empty-state-box">
@@ -150,22 +178,24 @@ export default function ResumeBuilder({ careerTwin, selectedVersionId, onNavigat
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           {activeVersion && (
-            <a
-              href={coachApi.getExportPdfUrl(activeVersion.version_id)}
-              download={`${activeVersion.title.replace(/\s+/g, '_')}.pdf`}
+            <button
+              type="button"
+              id="export-resume-pdf-btn"
+              onClick={handleExportPdf}
+              disabled={exportLoading}
               className="btn-accent"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', textDecoration: 'none' }}
               title="Download deterministic PDF export"
             >
-              📥 Export PDF
-            </a>
+              {exportLoading ? '⏳ Exporting…' : '📥 Export PDF'}
+            </button>
           )}
           <button 
-            className="btn-secondary"
+            className={activeVersion ? "btn-secondary" : "btn-accent"}
             onClick={() => setShowCloneModal(true)}
-            title="Create a new draft branching from this version"
+            title={activeVersion ? "Create a new draft branching from this version" : "Create a new resume draft"}
           >
-            ⎇ Branch / Clone Draft
+            {activeVersion ? "⎇ Branch / Clone Draft" : "+ Create New Version"}
           </button>
         </div>
       </div>
@@ -191,10 +221,18 @@ export default function ResumeBuilder({ careerTwin, selectedVersionId, onNavigat
         <div className="version-history-panel" style={{ background: '#F8FAFC', padding: '1rem', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
             <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: '#1E293B' }}>Version History</h4>
-            <span style={{ fontSize: '0.75rem', color: '#64748B' }}>{versions.length} versions</span>
+            <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
+              {versions.length > 0 ? `${versions.length} versions` : 'No versions yet'}
+            </span>
           </div>
 
           {loading && <div style={{ fontSize: '0.75rem', color: '#64748B', padding: '0.25rem 0' }}>Loading versions...</div>}
+
+          {!loading && versions.length === 0 && (
+            <div style={{ padding: '1.5rem 0.5rem', textAlign: 'center', color: '#64748B', fontSize: '0.85rem' }}>
+              No versions yet
+            </div>
+          )}
 
           <div className="version-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
             {versions.map((ver) => {
@@ -512,8 +550,25 @@ export default function ResumeBuilder({ careerTwin, selectedVersionId, onNavigat
               )}
             </div>
           ) : (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#64748B' }}>
-              Select a version from the history list to inspect its content and diff.
+            <div style={{ padding: '3rem 1.5rem', textAlign: 'center', color: '#64748B', background: '#FFFFFF', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
+              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📄</div>
+              <h4 style={{ color: '#1E293B', marginBottom: '0.5rem' }}>
+                {versions.length === 0 ? "No versions yet" : "No Version Selected"}
+              </h4>
+              <p style={{ margin: '0 auto', maxWidth: '400px', fontSize: '0.85rem' }}>
+                {versions.length === 0 
+                  ? "Create your first evidence-grounded resume draft to begin tailoring sections and tracking version diffs." 
+                  : "Select a version from the history list to inspect its content and diff."}
+              </p>
+              {versions.length === 0 && (
+                <button 
+                  className="btn-accent" 
+                  style={{ marginTop: '1rem' }} 
+                  onClick={() => setShowCloneModal(true)}
+                >
+                  + Create First Resume Version
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -534,21 +589,27 @@ export default function ResumeBuilder({ careerTwin, selectedVersionId, onNavigat
           zIndex: 1000
         }}>
           <div style={{ background: '#FFFFFF', padding: '1.5rem', borderRadius: '12px', width: '420px', maxWidth: '90%' }}>
-            <h3 style={{ margin: '0 0 0.5rem 0' }}>Branch / Clone Version</h3>
+            <h3 style={{ margin: '0 0 0.5rem 0' }}>
+              {activeVersion ? "Branch / Clone Version" : "Create Resume Version"}
+            </h3>
             <p style={{ fontSize: '0.85rem', color: '#64748B', margin: '0 0 1rem 0' }}>
-              Create a new draft version branching from "{activeVersion?.title}". Historical versions remain untouched.
+              {activeVersion 
+                ? `Create a new draft version branching from "${activeVersion.title}". Historical versions remain untouched.` 
+                : "Initialize a new evidence-grounded version from your Career Twin."}
             </p>
             <input
               type="text"
               className="form-control"
-              placeholder="e.g., Draft 3 — Backend Engineer Targeted"
+              placeholder={activeVersion ? "e.g., Draft 3 — Backend Engineer Targeted" : "e.g., Targeted Resume Draft"}
               value={cloneTitle}
               onChange={(e) => setCloneTitle(e.target.value)}
               style={{ width: '100%', padding: '0.6rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginBottom: '1rem' }}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
               <button className="btn-secondary" onClick={() => setShowCloneModal(false)}>Cancel</button>
-              <button className="btn-accent" onClick={handleCloneVersion}>Create Branch</button>
+              <button className="btn-accent" onClick={handleCloneVersion}>
+                {activeVersion ? "Create Branch" : "Create Version"}
+              </button>
             </div>
           </div>
         </div>

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Dict, List
 
 from fastapi import APIRouter, UploadFile, File, Form, Query, HTTPException, Depends, status, Response
+from app.core.auth import get_current_user, UserRecord
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -85,6 +86,21 @@ from app.services.coach.interview import (
     InterviewAnswerCoachService,
     InterviewQuestionService,
 )
+
+from app.schemas.career_execution import (
+    CreateCareerExecutionRequest, StartExecutionRequest,
+    UpdateExecutionProgressRequest, BlockExecutionRequest,
+    CompleteExecutionRequest, SubmitArtifactRequest,
+    VerifyEvidenceRequest, EvidenceVerificationResult,
+    CareerExecution, TargetProgressComparison
+)
+from app.services.coach.career_execution.service import CareerExecutionService
+from app.schemas.showcase import (
+    UpdateShowcaseRequest,
+    PublicCareerShowcase,
+    CareerShowcase
+)
+from app.services.coach.showcase.service import CareerShowcaseService
 from app.db.database import get_db, init_db
 from app.db.repository import Repository
 from app.core.exceptions import DocumentProcessingError
@@ -117,6 +133,14 @@ _resume_builder_service = ResumeBuilderService(
     validation_service=_validation_service
 )
 _career_intelligence_service = CareerIntelligenceService(job_fit_service=_job_fit_service)
+
+_career_execution_service = CareerExecutionService(
+    vault_service=_vault_service,
+    job_fit_service=_job_fit_service,
+    validation_service=_validation_service,
+)
+_showcase_service = CareerShowcaseService()
+
 _interview_question_service = InterviewQuestionService()
 _interview_answer_coach_service = InterviewAnswerCoachService(evidence_validator=_validation_service)
 _interview_readiness_service = InterviewReadinessService(
@@ -352,8 +376,12 @@ def coach_health():
 )
 async def upload_resume(
     resume_file: UploadFile = File(..., description="Candidate Resume PDF"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> ResumeUploadResponse:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     if not resume_file or not resume_file.filename:
         raise HTTPException(status_code=400, detail="A resume PDF file is required.")
 
@@ -377,7 +405,8 @@ async def upload_resume(
 
         # 2. Extract CandidateProfile
         profile = _resume_analyzer.analyze(doc)
-        cid = profile.candidate_id
+        profile.candidate_id = current_user.id  # Force ownership
+        cid = current_user.id
 
         # 3. Build Evidence Vault
         vault = _vault_service.build_vault(profile)
@@ -454,7 +483,7 @@ async def evaluate_job_fit(
     candidate_id: str = Form(..., description="ID of the previously uploaded candidate"),
     jd_file: Optional[UploadFile] = File(None, description="Optional target Job Description PDF"),
     jd_text: Optional[str] = Form(None, description="Optional target Job Description text (if PDF not provided)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> JobFitAnalysisResponse:
     # 1. Retrieve profile from in-memory cache or DB
     profile = _in_memory_profiles.get(candidate_id)
@@ -542,8 +571,12 @@ async def evaluate_job_fit(
 )
 def get_career_twin(
     payload: CareerTwinQueryRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> CareerTwinQueryResponse:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     cid = payload.candidate_id
     twin = _in_memory_twins.get(cid)
     vault = _get_or_load_vault(cid, db)
@@ -578,7 +611,7 @@ def get_candidate_evidence(
     skill: Optional[str] = Query(None, description="Filter by skill or technology"),
     project: Optional[str] = Query(None, description="Filter by project"),
     experience: Optional[str] = Query(None, description="Filter by role or organization"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> EvidenceQueryResponse:
     vault = _get_or_load_vault(candidate_id, db)
     if not vault:
@@ -625,8 +658,12 @@ def get_candidate_evidence(
 )
 def validate_candidate_claim(
     payload: ClaimValidationRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> ClaimValidationResult:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     vault = _get_or_load_vault(payload.candidate_id, db)
     if not vault:
         raise HTTPException(
@@ -645,8 +682,12 @@ def validate_candidate_claim(
 )
 def generate_resume_rewrite(
     payload: ResumeCoachRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> ResumeCoachResponse:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     cid = payload.candidate_id
     if not cid:
         raise HTTPException(status_code=400, detail="Candidate ID is required.")
@@ -690,8 +731,12 @@ def generate_resume_rewrite(
 )
 def create_resume_version(
     payload: CreateVersionRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> ResumeVersion:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     cid = payload.candidate_id
     if not cid:
         raise HTTPException(status_code=400, detail="Candidate ID is required.")
@@ -733,8 +778,12 @@ def create_resume_version(
 )
 def list_resume_versions(
     candidate_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> List[ResumeVersionSummary]:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     repo = Repository(db)
     records = repo.get_resume_versions_for_candidate(candidate_id)
 
@@ -813,8 +862,12 @@ def list_resume_versions(
 def get_resume_version_diff(
     version_id: str,
     compare_to_version_id: Optional[str] = Query(None, description="Optional parent version ID to compare against"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> ResumeVersionDiffResponse:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     ver = _get_or_load_version(version_id, db)
     if not ver:
         raise HTTPException(status_code=404, detail=f"Resume version '{version_id}' not found.")
@@ -838,9 +891,9 @@ def get_resume_version_diff(
 def export_resume_version_get(
     version_id: str,
     format: str = Query("pdf", description="Export format (pdf supported)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ):
-    return _export_resume_version_impl(version_id, db)
+    return _export_resume_version_impl(version_id, db, current_user)
 
 @router.post(
     "/resume-versions/{version_id}/export",
@@ -849,13 +902,14 @@ def export_resume_version_get(
 )
 def export_resume_version_post(
     version_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ):
-    return _export_resume_version_impl(version_id, db)
+    return _export_resume_version_impl(version_id, db, current_user)
 
-def _export_resume_version_impl(version_id: str, db: Session):
+def _export_resume_version_impl(version_id: str, db: Session, current_user: UserRecord):
     ver = _get_or_load_version(version_id, db)
-    if not ver:
+    # Ownership: a user may only export their own resume versions (404 avoids leaking existence)
+    if not ver or ver.candidate_id != current_user.id:
         raise HTTPException(status_code=404, detail=f"Resume version '{version_id}' not found.")
 
     twin = _get_or_load_twin(ver.candidate_id, db)
@@ -881,8 +935,12 @@ def _export_resume_version_impl(version_id: str, db: Session):
 def get_resume_version_detail(
     candidate_id: str,
     version_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> ResumeVersion:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     ver = _get_or_load_version(version_id, db)
     if not ver or ver.candidate_id != candidate_id:
         raise HTTPException(
@@ -901,8 +959,12 @@ def get_resume_version_detail(
 def apply_suggestion_to_resume_version(
     version_id: str,
     payload: ApplySuggestionRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> ApplySuggestionResponse:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     ver = _get_or_load_version(version_id, db)
     if not ver:
         raise HTTPException(status_code=404, detail=f"Resume version '{version_id}' not found.")
@@ -952,8 +1014,12 @@ def apply_suggestion_to_resume_version(
 def recheck_version_job_fit(
     version_id: str,
     payload: JobFitRecheckRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> JobFitRecheckResponse:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     ver = _get_or_load_version(version_id, db)
     if not ver:
         raise HTTPException(status_code=404, detail=f"Resume version '{version_id}' not found.")
@@ -1001,8 +1067,12 @@ def recheck_version_job_fit(
 def clone_resume_version(
     version_id: str,
     payload: Optional[CloneVersionRequest] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> ResumeVersion:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     ver = _get_or_load_version(version_id, db)
     if not ver:
         raise HTTPException(status_code=404, detail=f"Resume version '{version_id}' not found.")
@@ -1027,8 +1097,12 @@ def clone_resume_version(
 )
 def create_career_target(
     payload: CreateCareerTargetRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> CareerTarget:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     twin = _get_or_load_twin(payload.candidate_id, db)
     if not twin:
         raise HTTPException(
@@ -1060,8 +1134,12 @@ def create_career_target(
 def list_career_targets(
     candidate_id: str,
     status_filter: Optional[str] = Query(None, alias="status"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> List[CareerTargetSummary]:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     repo = Repository(db)
     records = repo.get_career_targets_for_candidate(candidate_id, status=status_filter)
     summaries = []
@@ -1079,6 +1157,37 @@ def list_career_targets(
         ))
     return summaries
 
+# NOTE: Must be declared BEFORE "/career-targets/{candidate_id}/{target_id}".
+# Otherwise "/career-targets/<target_id>/progress" is captured by that dynamic
+# route with target_id="progress" ("Career target 'progress' not found.").
+@router.get(
+    "/career-targets/{target_id}/progress",
+    response_model=TargetProgressComparison,
+    summary="Get Career Target Before/After Progress",
+    description="Computes before/after requirement progress comparison and chronological timeline."
+)
+def get_career_target_progress(
+    target_id: str,
+    candidate_id: Optional[str] = Query(None, description="Ignored; tenancy is taken from the authenticated user"),
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
+) -> TargetProgressComparison:
+    # AUTHENTICATION OVERRIDE: tenancy always comes from the authenticated user
+    candidate_id = current_user.id
+    try:
+        twin = _get_or_load_twin(candidate_id, db)
+        vault = _get_or_load_vault(candidate_id, db)
+        return _career_execution_service.get_target_progress(
+            target_id=target_id,
+            candidate_id=candidate_id,
+            twin=twin,
+            vault=vault,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
 @router.get(
     "/career-targets/{candidate_id}/{target_id}",
     response_model=CareerTarget,
@@ -1089,8 +1198,12 @@ def list_career_targets(
 def get_career_target_detail(
     candidate_id: str,
     target_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> CareerTarget:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     target = _get_or_load_target(target_id, db)
     if not target:
         raise HTTPException(status_code=404, detail=f"Career target '{target_id}' not found.")
@@ -1112,7 +1225,7 @@ def get_career_intelligence(
     candidate_id: str,
     target_id: str,
     previous_coverage: Optional[float] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> CareerIntelligenceResponse:
     target = _get_or_load_target(target_id, db)
     if not target:
@@ -1154,8 +1267,12 @@ def get_career_intelligence(
 def refresh_career_intelligence(
     target_id: str,
     payload: RefreshTargetRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> CareerIntelligenceResponse:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     target = _get_or_load_target(target_id, db)
     if not target:
         raise HTTPException(status_code=404, detail=f"Career target '{target_id}' not found.")
@@ -1195,8 +1312,12 @@ def refresh_career_intelligence(
 )
 def create_career_action(
     payload: CreateCareerActionRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> CareerAction:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     action_id = f"act_{uuid.uuid4().hex[:10]}"
     repo = Repository(db)
     rec = repo.save_career_action(
@@ -1237,7 +1358,7 @@ def list_career_actions(
     candidate_id: str,
     target_id: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> List[CareerAction]:
     repo = Repository(db)
     records = repo.get_career_actions_for_candidate(
@@ -1273,8 +1394,12 @@ def list_career_actions(
 def complete_career_action(
     action_id: str,
     payload: ActionStatusRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> CareerAction:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     try:
         return _career_intelligence_service.complete_action(
             action_id=action_id,
@@ -1296,8 +1421,12 @@ def complete_career_action(
 def dismiss_career_action(
     action_id: str,
     payload: ActionStatusRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> CareerAction:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     try:
         return _career_intelligence_service.dismiss_action(
             action_id=action_id,
@@ -1323,8 +1452,12 @@ def dismiss_career_action(
 )
 def create_interview_target(
     payload: CreateInterviewTargetRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> InterviewTarget:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     target = _interview_readiness_service.create_interview_target(
         candidate_id=payload.candidate_id,
         target_role=payload.target_role,
@@ -1345,8 +1478,12 @@ def create_interview_target(
 )
 def get_candidate_interview_targets(
     candidate_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> List[InterviewTarget]:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     targets = _interview_readiness_service.get_interview_targets_for_candidate(candidate_id, db=db)
     for t in targets:
         _in_memory_interview_targets[t.interview_target_id] = t
@@ -1364,8 +1501,12 @@ def get_candidate_interview_targets(
 def get_interview_target_detail(
     candidate_id: str,
     target_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> InterviewTarget:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     target = _get_or_load_interview_target(target_id, db)
     if not target:
         raise HTTPException(status_code=404, detail=f"Interview target '{target_id}' not found.")
@@ -1383,8 +1524,12 @@ def get_interview_target_detail(
 def get_interview_readiness(
     candidate_id: str,
     target_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> InterviewReadinessResponse:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     target = _get_or_load_interview_target(target_id, db)
     if not target:
         raise HTTPException(status_code=404, detail=f"Interview target '{target_id}' not found.")
@@ -1421,8 +1566,12 @@ def get_interview_readiness(
 def refresh_interview_readiness(
     target_id: str,
     candidate_id: str = Query(..., description="Candidate ID"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> InterviewReadinessResponse:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     target = _get_or_load_interview_target(target_id, db)
     if not target:
         raise HTTPException(status_code=404, detail=f"Interview target '{target_id}' not found.")
@@ -1458,8 +1607,12 @@ def refresh_interview_readiness(
 def get_interview_questions(
     target_id: str,
     candidate_id: str = Query(..., description="Candidate ID"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> List[InterviewQuestion]:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     target = _get_or_load_interview_target(target_id, db)
     if not target:
         raise HTTPException(status_code=404, detail=f"Interview target '{target_id}' not found.")
@@ -1485,8 +1638,12 @@ class GenerateQuestionsRequest(BaseModel):
 )
 def generate_interview_questions(
     payload: GenerateQuestionsRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> List[InterviewQuestion]:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     target = _get_or_load_interview_target(payload.interview_target_id, db)
     if not target:
         raise HTTPException(status_code=404, detail="Interview target not found.")
@@ -1508,8 +1665,12 @@ def generate_interview_questions(
 )
 def validate_interview_answer(
     payload: ValidateAnswerRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> AnswerValidationResult:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     vault = _get_or_load_vault(payload.candidate_id, db)
     if not vault:
         raise HTTPException(status_code=404, detail=f"Evidence Vault for '{payload.candidate_id}' not found.")
@@ -1532,8 +1693,12 @@ def validate_interview_answer(
 )
 def create_interview_session(
     payload: CreateInterviewSessionRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> InterviewSession:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     target = _get_or_load_interview_target(payload.interview_target_id, db)
     if not target:
         raise HTTPException(status_code=404, detail="Interview target not found.")
@@ -1563,8 +1728,12 @@ def create_interview_session(
 def submit_session_answer(
     session_id: str,
     payload: SubmitSessionAnswerRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> InterviewSession:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     vault = _get_or_load_vault(payload.candidate_id, db)
     if not vault:
         raise HTTPException(status_code=404, detail="Evidence Vault not found.")
@@ -1593,8 +1762,12 @@ def submit_session_answer(
 )
 def get_project_stories(
     candidate_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), current_user: UserRecord = Depends(get_current_user)
 ) -> List[ProjectStory]:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
     twin = _get_or_load_twin(candidate_id, db)
     vault = _get_or_load_vault(candidate_id, db)
     if not twin or not vault:
@@ -1608,6 +1781,442 @@ def get_project_stories(
     readiness = _interview_readiness_service.generate_interview_readiness(target, twin, vault, db)
     return readiness.project_stories
 
+@router.get(
+    "/career-executions/{candidate_id}",
+    response_model=List[CareerExecution],
+    summary="List Career Executions",
+    description="Returns all execution records for a candidate, optionally filtered by target_id."
+)
+def list_career_executions(
+    candidate_id: str,
+    target_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> List[CareerExecution]:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+    
+    try:
+        return _career_execution_service.list_executions_for_candidate(
+            candidate_id=candidate_id,
+            target_id=target_id,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.post(
+    "/career-executions",
+    response_model=CareerExecution,
+    summary="Create Career Execution",
+    description="Initializes persistent tracking for a career action."
+)
+def create_career_execution(
+    payload: CreateCareerExecutionRequest,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> CareerExecution:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+    
+    try:
+        return _career_execution_service.create_execution(
+            candidate_id=payload.candidate_id,
+            action_id=payload.action_id,
+            target_id=payload.target_id,
+            notes=payload.notes,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
+
+@router.get(
+    "/career-executions/{candidate_id}/{execution_id}",
+    response_model=CareerExecution,
+    summary="Get Career Execution Detail",
+    description="Returns a single execution record with strict tenant ownership verification."
+)
+def get_career_execution_detail(
+    candidate_id: str,
+    execution_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> CareerExecution:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+    
+    try:
+        return _career_execution_service.get_execution(
+            candidate_id=candidate_id,
+            execution_id=execution_id,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/start",
+    response_model=CareerExecution,
+    summary="Start Career Execution",
+    description="Transitions an execution from NOT_STARTED to IN_PROGRESS."
+)
+def start_career_execution(
+    execution_id: str,
+    payload: StartExecutionRequest,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> CareerExecution:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+    
+    try:
+        return _career_execution_service.start_execution(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/progress",
+    response_model=CareerExecution,
+    summary="Update Career Execution Progress",
+    description="Updates progress percentage and notes. Never grants skills or verified evidence directly."
+)
+def update_career_execution_progress(
+    execution_id: str,
+    payload: UpdateExecutionProgressRequest,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> CareerExecution:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+    
+    try:
+        return _career_execution_service.update_progress(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            progress_percent=payload.progress_percent,
+            notes=payload.notes,
+            next_step=payload.next_step,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/submit-artifact",
+    response_model=CareerExecution,
+    summary="Submit Execution Artifact",
+    description="Attaches a genuine artifact reference to the execution record."
+)
+def submit_career_execution_artifact(
+    execution_id: str,
+    payload: SubmitArtifactRequest,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> CareerExecution:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+    
+    try:
+        return _career_execution_service.submit_artifact(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            name=payload.name,
+            artifact_type=payload.artifact_type,
+            url_or_path=payload.url_or_path,
+            description=payload.description,
+            technologies=payload.technologies,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/complete",
+    response_model=CareerExecution,
+    summary="Complete Career Execution (Self-Reported)",
+    description="Marks execution as SELF_REPORTED_COMPLETE. Does NOT alter Evidence Vault or Twin."
+)
+def complete_career_execution_self_reported(
+    execution_id: str,
+    payload: CompleteExecutionRequest,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> CareerExecution:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+    
+    try:
+        return _career_execution_service.complete_self_reported(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            notes=payload.notes,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/block",
+    response_model=CareerExecution,
+    summary="Report Execution Blocker",
+    description="Flags execution as BLOCKED with reason and next steps."
+)
+def block_career_execution(
+    execution_id: str,
+    payload: BlockExecutionRequest,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> CareerExecution:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+    
+    try:
+        return _career_execution_service.report_blocker(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            blocker_reason=payload.blocker_reason,
+            next_step=payload.next_step,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/verify-evidence",
+    response_model=EvidenceVerificationResult,
+    summary="Verify Execution Evidence",
+    description="Validates submitted artifact claims and attaches verified items to Evidence Vault."
+)
+def verify_career_execution_evidence(
+    execution_id: str,
+    payload: VerifyEvidenceRequest,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> EvidenceVerificationResult:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+    
+    try:
+        twin = _get_or_load_twin(payload.candidate_id, db)
+        vault = _get_or_load_vault(payload.candidate_id, db)
+        return _career_execution_service.verify_evidence(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            evidence_claims=payload.evidence_claims,
+            artifact_id=payload.artifact_id,
+            db=db,
+            twin=twin,
+            vault=vault,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+# =============================================================================
+# PHASE 9: CAREER SHOWCASE & PRODUCTION RELEASE ENDPOINTS
+# =============================================================================
+
+@router.get(
+    "/showcase/{candidate_id}",
+    response_model=CareerShowcase,
+    summary="Get Private Career Showcase",
+    description="Returns the full career showcase for the candidate."
+)
+def get_career_showcase(
+    candidate_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> CareerShowcase:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+
+    try:
+        twin = _get_or_load_twin(candidate_id, db)
+        vault = _get_or_load_vault(candidate_id, db) or EvidenceVault(
+            vault_id=f"vault_{candidate_id}", candidate_id=candidate_id, items=[], total_items=0
+        )
+        return _showcase_service.get_candidate_showcase(
+            candidate_id=candidate_id,
+            twin=twin,
+            vault=vault,
+            db=db
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.put(
+    "/showcase/{candidate_id}",
+    response_model=CareerShowcase,
+    summary="Update Career Showcase"
+)
+def update_career_showcase(
+    candidate_id: str,
+    payload: UpdateShowcaseRequest,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+) -> CareerShowcase:
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+
+    try:
+        twin = _get_or_load_twin(candidate_id, db)
+        vault = _get_or_load_vault(candidate_id, db) or EvidenceVault(
+            vault_id=f"vault_{candidate_id}", candidate_id=candidate_id, items=[], total_items=0
+        )
+        return _showcase_service.update_showcase(
+            candidate_id=candidate_id,
+            request=payload,
+            twin=twin,
+            vault=vault,
+            db=db
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/showcase/{candidate_id}/share-token",
+    summary="Generate Share Token"
+)
+def generate_showcase_share_token(
+    candidate_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+):
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+
+    try:
+        return _showcase_service.generate_share_token(
+            candidate_id=candidate_id,
+            db=db
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/showcase/{candidate_id}/revoke-share",
+    summary="Revoke Share Token"
+)
+def revoke_showcase_share_token(
+    candidate_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+):
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+
+    try:
+        return _showcase_service.revoke_share_token(
+            candidate_id=candidate_id,
+            db=db
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get(
+    "/showcase/public/{share_token}",
+    response_model=PublicCareerShowcase,
+    summary="Get Public/Shareable Career Showcase"
+)
+def get_public_career_showcase(
+    share_token: str,
+    db: Session = Depends(get_db)
+) -> PublicCareerShowcase:
+    try:
+        return _showcase_service.get_public_showcase_by_token(
+            share_token=share_token,
+            db=db
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get(
+    "/showcase/{candidate_id}/export",
+    summary="Export Career Showcase"
+)
+def export_career_showcase(
+    candidate_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserRecord = Depends(get_current_user)
+):
+    # AUTHENTICATION OVERRIDE
+    locals_dict = locals()
+    if 'candidate_id' in locals_dict: candidate_id = current_user.id
+    if 'payload' in locals_dict and hasattr(locals_dict['payload'], 'candidate_id'): locals_dict['payload'].candidate_id = current_user.id
+
+    try:
+        twin = _get_or_load_twin(candidate_id, db)
+        vault = _get_or_load_vault(candidate_id, db) or EvidenceVault(
+            vault_id=f"vault_{candidate_id}", candidate_id=candidate_id, items=[], total_items=0
+        )
+        return _showcase_service.export_showcase_data(
+            candidate_id=candidate_id,
+            twin=twin,
+            vault=vault,
+            db=db
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

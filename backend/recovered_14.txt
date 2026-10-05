@@ -1,0 +1,59 @@
+Created At: 2026-10-04T17:14:04+05:30
+Completed At: 2026-10-04T17:14:04+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2107
+Total Bytes: 77770
+Showing lines 130 to 180
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+130: _in_memory_targets: Dict[str, CareerTarget] = {}
+131: _in_memory_actions: Dict[str, CareerAction] = {}
+132: 
+133: # Ensure DB initialized
+134: init_db()
+135: 
+136: # Service singletons
+137: _parser = DocumentParser()
+138: _resume_analyzer = ResumeAnalyzer()
+139: _jd_analyzer = JDAnalyzer()
+140: _twin_service = CareerTwinService()
+141: _vault_service = EvidenceVaultService()
+142: _validation_service = EvidenceValidationService()
+143: _job_fit_service = JobFitService(jd_analyzer=_jd_analyzer)
+144: _ats_service = ATSStressTestService()
+145: _resume_coach_service = ResumeCoachService(validation_service=_validation_service)
+146: _resume_builder_service = ResumeBuilderService(
+147:     resume_coach_service=_resume_coach_service,
+148:     validation_service=_validation_service
+149: )
+150: _career_intelligence_service = CareerIntelligenceService(job_fit_service=_job_fit_service)
+151: _interview_question_service = InterviewQuestionService()
+152: _interview_answer_coach_service = InterviewAnswerCoachService(evidence_validator=_validation_service)
+153: _interview_readiness_service = InterviewReadinessService(
+154:     career_intelligence_service=_career_intelligence_service,
+155:     question_service=_interview_question_service,
+156:     answer_coach_service=_interview_answer_coach_service,
+157: )
+158: _career_execution_service = CareerExecutionService(
+159:     vault_service=_vault_service,
+160:     job_fit_service=_job_fit_service,
+161:     validation_service=_validation_service,
+162: )
+163: _showcase_service = CareerShowcaseService()
+164: 
+165: _in_memory_interview_targets: Dict[str, InterviewTarget] = {}
+166: _in_memory_interview_sessions: Dict[str, InterviewSession] = {}
+167: 
+168: class RefreshTargetRequest(BaseModel):
+169:     candidate_id: str
+170:     previous_coverage: Optional[float] = None
+171: 
+172: class ActionStatusRequest(BaseModel):
+173:     candidate_id: str
+174: 
+175: class ClaimValidationRequest(BaseModel):
+176:     candidate_id: str
+177:     claim: str
+178: 
+179: def _get_or_load_vault(candidate_id: str, db: Session) -> Optional[EvidenceVault]:
+180:     """Helper to retrieve vault from memory or reconstruct from SQLite database."""
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

@@ -1,0 +1,44 @@
+Created At: 2026-10-04T16:58:00+05:30
+Completed At: 2026-10-04T16:58:00+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2102
+Total Bytes: 77466
+Showing lines 245 to 280
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+245:         experience_index=experience_idx
+246:     )
+247:     _in_memory_vaults[candidate_id] = vault
+248:     return vault
+249: 
+250: def _get_or_load_twin(candidate_id: str, db: Session) -> Optional[CareerTwin]:
+251:     twin = _in_memory_twins.get(candidate_id)
+252:     if twin:
+253:         return twin
+254:     repo = Repository(db)
+255:     rec = repo.get_candidate_profile(candidate_id)
+256:     if not rec:
+257:         return None
+258:     twin_data = json.loads(rec.profile_json)
+259:     twin = CareerTwin(**twin_data)
+260:     _in_memory_twins[candidate_id] = twin
+261:     return twin
+262: 
+263: def _get_or_load_version(version_id: str, db: Session) -> Optional[ResumeVersion]:
+264:     if version_id in _in_memory_versions:
+265:         return _in_memory_versions[version_id]
+266:     repo = Repository(db)
+267:     rec = repo.get_resume_version(version_id)
+268:     if not rec:
+269:         return None
+270:     sections = [ResumeSection(**s) for s in json.loads(rec.sections_json)]
+271:     suggestions = [AcceptedSuggestion(**s) for s in json.loads(rec.accepted_suggestions_json)]
+272:     evidence_ids = json.loads(rec.evidence_ids_json)
+273:     ver = ResumeVersion(
+274:         version_id=rec.version_id,
+275:         candidate_id=rec.candidate_id,
+276:         parent_version_id=rec.parent_version_id,
+277:         created_at=rec.created_at.isoformat() if rec.created_at else "",
+278:         updated_at=rec.updated_at.isoformat() if rec.updated_at else "",
+279:         title=rec.title,
+280:         target_role=rec.target_role,
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

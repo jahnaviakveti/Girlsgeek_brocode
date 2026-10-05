@@ -1,0 +1,244 @@
+def create_career_execution(
+    payload: CreateCareerExecutionRequest,
+    db: Session = Depends(get_db)
+) -> CareerExecution:
+    try:
+        return _career_execution_service.create_execution(
+            candidate_id=payload.candidate_id,
+            action_id=payload.action_id,
+            target_id=payload.target_id,
+            title=payload.title,
+            notes=payload.notes,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get(
+    "/career-executions/{candidate_id}",
+    response_model=List[CareerExecution],
+    summary="List Career Executions",
+    description="Returns all execution records for a candidate, optionally filtered by target_id."
+)
+def list_career_executions(
+    candidate_id: str,
+    target_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+) -> List[CareerExecution]:
+    return _career_execution_service.list_executions_for_candidate(
+        candidate_id=candidate_id,
+        target_id=target_id,
+        db=db,
+    )
+
+
+@router.get(
+    "/career-executions/{candidate_id}/{execution_id}",
+    response_model=CareerExecution,
+    summary="Get Career Execution Detail",
+    description="Returns a single execution record with strict tenant ownership verification."
+)
+def get_career_execution_detail(
+    candidate_id: str,
+    execution_id: str,
+    db: Session = Depends(get_db)
+) -> CareerExecution:
+    try:
+        return _career_execution_service.get_execution(
+            candidate_id=candidate_id,
+            execution_id=execution_id,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/start",
+    response_model=CareerExecution,
+    summary="Start Career Execution",
+    description="Transitions an execution from NOT_STARTED to IN_PROGRESS."
+)
+def start_career_execution(
+    execution_id: str,
+    payload: StartExecutionRequest,
+    db: Session = Depends(get_db)
+) -> CareerExecution:
+    try:
+        return _career_execution_service.start_execution(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/progress",
+    response_model=CareerExecution,
+    summary="Update Career Execution Progress",
+    description="Updates progress percentage and notes. Never grants skills or verified evidence directly."
+)
+def update_career_execution_progress(
+    execution_id: str,
+    payload: UpdateExecutionProgressRequest,
+    db: Session = Depends(get_db)
+) -> CareerExecution:
+    try:
+        notes = payload.notes or payload.note
+        return _career_execution_service.update_progress(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            progress_percent=payload.progress_percent,
+            notes=notes,
+            next_step=payload.next_step,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/submit-artifact",
+    response_model=CareerExecution,
+    summary="Submit Execution Artifact",
+    description="Attaches a genuine artifact reference to the execution record."
+)
+def submit_career_execution_artifact(
+    execution_id: str,
+    payload: SubmitArtifactRequest,
+    db: Session = Depends(get_db)
+) -> CareerExecution:
+    try:
+        art_dict = payload.artifact or {}
+        name = payload.name or payload.title or art_dict.get("title") or art_dict.get("name") or "Artifact"
+        raw_type = payload.artifact_type or art_dict.get("artifact_type") or ArtifactType.GITHUB_REPO
+        if isinstance(raw_type, str):
+            try:
+                artifact_type = ArtifactType(raw_type)
+            except ValueError:
+                artifact_type = ArtifactType.OTHER
+        else:
+            artifact_type = raw_type
+        url_or_path = payload.url_or_path or payload.uri or art_dict.get("uri") or art_dict.get("url_or_path") or "https://artifact"
+        description = payload.description or art_dict.get("description") or ""
+        technologies = payload.technologies or art_dict.get("technologies") or []
+
+        return _career_execution_service.submit_artifact(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            name=name,
+            artifact_type=artifact_type,
+            url_or_path=url_or_path,
+            description=description,
+            technologies=technologies,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/complete",
+    response_model=CareerExecution,
+    summary="Complete Career Execution (Self-Reported)",
+    description="Marks execution as SELF_REPORTED_COMPLETE. Does NOT alter Evidence Vault or Twin."
+)
+def complete_career_execution_self_reported(
+    execution_id: str,
+    payload: CompleteExecutionRequest,
+    db: Session = Depends(get_db)
+) -> CareerExecution:
+    try:
+        notes = payload.notes or payload.final_notes
+        return _career_execution_service.complete_self_reported(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            notes=notes,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/block",
+    response_model=CareerExecution,
+    summary="Report Execution Blocker",
+    description="Flags execution as BLOCKED with reason and next steps."
+)
+def block_career_execution(
+    execution_id: str,
+    payload: BlockExecutionRequest,
+    db: Session = Depends(get_db)
+) -> CareerExecution:
+    try:
+        return _career_execution_service.report_blocker(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            blocker_reason=payload.blocker_reason,
+            next_step=payload.next_step,
+            db=db,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/career-executions/{execution_id}/verify-evidence",
+    response_model=EvidenceVerificationResult,
+    summary="Verify Execution Evidence",
+    description="Validates submitted artifact claims and attaches verified items to Evidence Vault."
+)
+def verify_career_execution_evidence(
+    execution_id: str,
+    payload: VerifyEvidenceRequest,
+    db: Session = Depends(get_db)
+) -> EvidenceVerificationResult:
+    try:
+        twin = _get_or_load_twin(payload.candidate_id, db)
+        vault = _get_or_load_vault(payload.candidate_id, db)
+        result = _career_execution_service.verify_evidence(
+            candidate_id=payload.candidate_id,
+            execution_id=execution_id,
+            evidence_claims=payload.evidence_claims,
+            artifact_id=payload.artifact_id,
+            db=db,
+            twin=twin,
+            vault=vault,
+        )
+        if result.verified:
+            try:
+                execution = _career_execution_service.get_execution(payload.candidate_id, execution_id, db=db)
+                if execution and execution.target_id:
+                    target = _get_or_load_target(execution.target_id, db)
+                    if target and twin and vault:
+                        _career_intelligence_service.refresh_target_intelligence(
+                            target=target,
+                            twin=twin,
+                            vault=vault,
+                            db=db,
+                        )
+            except Exception:
+                pass
+        return result
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

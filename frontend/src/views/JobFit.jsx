@@ -241,6 +241,42 @@ export default function JobFit({ careerTwin, onHandoffToResumeCoach }) {
             </div>
           )}
 
+
+          {/* Bulk Improve CTA */}
+          <div className="bulk-improve-action" style={{marginTop: '1rem', marginBottom: '1rem', textAlign: 'center'}}>
+            <button 
+              className="btn-primary" 
+              style={{fontSize: '1.1rem', padding: '1rem 2rem', background: 'linear-gradient(135deg, #4f46e5, #7c3aed)'}}
+              onClick={() => {
+                if (!onHandoffToResumeCoach || !fitData?.job_fit_analysis) return;
+                
+                const gaps = (fitData.job_fit_analysis.requirements || []).filter(req => 
+                  req.gap_type === 'RESUME_VISIBILITY_GAP' || req.gap_type === 'EXPERIENCE_GAP' || req.gap_type === 'NOT_VERIFIABLE'
+                );
+                
+                const payloads = gaps.map(req => {
+                  const opp = fitData.job_fit_analysis.improvement_opportunities?.find(o => o.requirement_id === req.requirement_id);
+                  return opp?.handoff_payload || {
+                    requirement_id: req.requirement_id,
+                    requirement_text: req.requirement_text,
+                    target_role: fitData.job_fit_analysis.target_role || fitData.job_title || "Target Role",
+                    priority: req.priority,
+                    gap_type: req.gap_type,
+                    can_rewrite: req.gap_type === 'RESUME_VISIBILITY_GAP',
+                    evidence_ids: (req.evidence || []).map(e => e.evidence_id).filter(Boolean),
+                    existing_evidence_snippets: (req.evidence || []).map(e => e.source_text),
+                    missing_elements: req.missing_evidence || [],
+                    action_prompt: req.candidate_action
+                  };
+                });
+
+                onHandoffToResumeCoach({ bulk: true, items: payloads, target_role: fitData.job_title });
+              }}
+            >
+              ✨ Improve My Resume for This Job
+            </button>
+          </div>
+
           {/* 3. Requirement Breakdown Filter Bar */}
           <div className="jobfit-filter-bar">
             <button

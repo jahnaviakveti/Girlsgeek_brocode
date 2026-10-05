@@ -1,0 +1,808 @@
+Created At: 2026-10-04T16:22:45+05:30
+Completed At: 2026-10-04T16:22:45+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2102
+Total Bytes: 77466
+Showing lines 1 to 800
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import os
+2: import re
+3: import json
+4: import shutil
+5: import tempfile
+6: import uuid
+7: from pathlib import Path
+8: from typing import Optional, Dict, List, Any
+9: 
+10: from fastapi import APIRouter, UploadFile, File, Form, Query, HTTPException, Depends, status, Response, Header
+11: from pydantic import BaseModel
+12: from sqlalchemy.orm import Session
+13: 
+14: from app.schemas.coach_api import (
+15:     ResumeUploadResponse,
+16:     JobFitAnalysisResponse,
+17:     CareerTwinQueryRequest,
+18:     CareerTwinQueryResponse,
+19:     EvidenceQueryResponse,
+20:     ResumeCoachRequest,
+21:     ResumeCoachResponse,
+22: )
+23: from app.schemas.career_twin import CareerTwin
+24: from app.schemas.evidence_vault import EvidenceVault, VaultEvidenceItem, ClaimValidationResult
+25: from app.schemas.candidate import CandidateProfile
+26: from app.schemas.resume_version import (
+27:     ResumeVersion,
+28:     ResumeVersionSummary,
+29:     CreateVersionRequest,
+30:     CloneVersionRequest,
+31:     ApplySuggestionRequest,
+32:     ApplySuggestionResponse,
+33:     ResumeVersionDiffResponse,
+34:     JobFitRecheckRequest,
+35:     JobFitRecheckResponse,
+36:     ResumeSection,
+37:     AcceptedSuggestion,
+38:     ResumeVersionStatus,
+39: )
+40: from app.schemas.career_intelligence import (
+41:     TargetStatus,
+42:     GapPriority,
+43:     ActionType,
+44:     ActionStatus,
+45:     CareerTarget,
+46:     CareerTargetSummary,
+47:     CareerStrength,
+48:     RequirementGap,
+49:     CareerAction,
+50:     ProgressSummary,
+51:     CareerIntelligenceResponse,
+52:     CreateCareerTargetRequest,
+53:     CreateCareerActionRequest,
+54: )
+55: from app.services.document_parser import DocumentParser
+56: from app.services.resume_analyzer import ResumeAnalyzer
+57: from app.services.jd_analyzer import JDAnalyzer
+58: from app.services.coach.career_twin import CareerTwinService
+59: from app.services.coach.evidence import EvidenceVaultService, EvidenceValidationService
+60: from app.services.coach.job_fit import JobFitService
+61: from app.services.coach.ats import ATSStressTestService
+62: from app.services.coach.resume import ResumeCoachService
+63: from app.services.coach.resume_builder import ResumeBuilderService
+64: from app.services.coach.career_intelligence import CareerIntelligenceService
+65: from app.schemas.interview_readiness import (
+66:     InterviewTargetStatus,
+67:     PreparationStatus,
+68:     QuestionType,
+69:     ValidationVerdict,
+70:     InterviewTarget,
+71:     InterviewRequirementMapItem,
+72:     InterviewQuestion,
+73:     ProjectStory,
+74:     AnswerValidationResult,
+75:     InterviewSession,
+76:     InterviewSessionItem,
+77:     InterviewReadinessResponse,
+78:     CreateInterviewTargetRequest,
+79:     ValidateAnswerRequest,
+80:     CreateInterviewSessionRequest,
+81:     SubmitSessionAnswerRequest,
+82: )
+83: from app.services.coach.interview import (
+84:     InterviewReadinessService,
+85:     InterviewAnswerCoachService,
+86:     InterviewQuestionService,
+87: )
+88: from app.schemas.career_execution import (
+89:     CareerExecution,
+90:     ExecutionStatus,
+91:     ProgressState,
+92:     ArtifactType,
+93:     ArtifactReference,
+94:     ExecutionNote,
+95:     EvidenceClaimSubmission,
+96:     EvidenceVerificationResult,
+97:     RequirementProgressItem,
+98:     TimelineEventType,
+99:     TimelineEvent,
+100:     TargetRequirementDelta,
+101:     TargetProgressComparison,
+102:     CreateCareerExecutionRequest,
+103:     StartExecutionRequest,
+104:     UpdateExecutionProgressRequest,
+105:     SubmitArtifactRequest,
+106:     CompleteExecutionRequest,
+107:     BlockExecutionRequest,
+108:     VerifyEvidenceRequest,
+109: )
+110: from app.services.coach.career_execution import CareerExecutionService
+111: from app.schemas.showcase import (
+112:     CareerShowcase,
+113:     PublicCareerShowcase,
+114:     UpdateShowcaseRequest,
+115:     GenerateShareTokenResponse,
+116:     RevokeShareTokenResponse,
+117: )
+118: from app.services.coach.showcase import CareerShowcaseService
+119: from app.db.database import get_db, init_db
+120: from app.db.repository import Repository
+121: from app.core.exceptions import DocumentProcessingError
+122: 
+123: router = APIRouter()
+124: 
+125: # In-memory session store for rapid retrieval
+126: _in_memory_profiles: Dict[str, CandidateProfile] = {}
+127: _in_memory_twins: Dict[str, CareerTwin] = {}
+128: _in_memory_vaults: Dict[str, EvidenceVault] = {}
+129: _in_memory_versions: Dict[str, ResumeVersion] = {}
+130: _in_memory_targets: Dict[str, CareerTarget] = {}
+131: _in_memory_actions: Dict[str, CareerAction] = {}
+132: 
+133: # Ensure DB initialized
+134: init_db()
+135: 
+136: # Service singletons
+137: _parser = DocumentParser()
+138: _resume_analyzer = ResumeAnalyzer()
+139: _jd_analyzer = JDAnalyzer()
+140: _twin_service = CareerTwinService()
+141: _vault_service = EvidenceVaultService()
+142: _validation_service = EvidenceValidationService()
+143: _job_fit_service = JobFitService(jd_analyzer=_jd_analyzer)
+144: _ats_service = ATSStressTestService()
+145: _resume_coach_service = ResumeCoachService(validation_service=_validation_service)
+146: _resume_builder_service = ResumeBuilderService(
+147:     resume_coach_service=_resume_coach_service,
+148:     validation_service=_validation_service
+149: )
+150: _career_intelligence_service = CareerIntelligenceService(job_fit_service=_job_fit_service)
+151: _interview_question_service = InterviewQuestionService()
+152: _interview_answer_coach_service = InterviewAnswerCoachService(evidence_validator=_validation_service)
+153: _interview_readiness_service = InterviewReadinessService(
+154:     career_intelligence_service=_career_intelligence_service,
+155:     question_service=_interview_question_service,
+156:     answer_coach_service=_interview_answer_coach_service,
+157: )
+158: _career_execution_service = CareerExecutionService(
+159:     vault_service=_vault_service,
+160:     job_fit_service=_job_fit_service,
+161:     validation_service=_validation_service,
+162: )
+163: _showcase_service = CareerShowcaseService()
+164: 
+165: _in_memory_interview_targets: Dict[str, InterviewTarget] = {}
+166: _in_memory_interview_sessions: Dict[str, InterviewSession] = {}
+167: 
+168: class RefreshTargetRequest(BaseModel):
+169:     candidate_id: str
+170:     previous_coverage: Optional[float] = None
+171: 
+172: class ActionStatusRequest(BaseModel):
+173:     candidate_id: str
+174: 
+175: class ClaimValidationRequest(BaseModel):
+176:     candidate_id: str
+177:     claim: str
+178: 
+179: def _get_or_load_vault(candidate_id: str, db: Session) -> Optional[EvidenceVault]:
+180:     """Helper to retrieve vault from memory or reconstruct from SQLite database."""
+181:     vault = _in_memory_vaults.get(candidate_id)
+182:     if vault:
+183:         return vault
+184: 
+185:     repo = Repository(db)
+186:     records = repo.get_evidence_for_candidate(candidate_id)
+187:     if not records:
+188:         return None
+189: 
+190:     items: List[VaultEvidenceItem] = []
+191:     for r in records:
+192:         facts = json.loads(r.normalized_facts) if r.normalized_facts else []
+193:         techs = [t.strip() for t in (r.related_tech or "").split(",") if t.strip()]
+194:         items.append(
+195:             VaultEvidenceItem(
+196:                 evidence_id=r.evidence_id,
+197:                 candidate_id=r.candidate_id,
+198:                 source_text=r.source_text,
+199:                 source_document=r.source_document,
+200:                 source_section=r.source_section,
+201:                 page_number=r.page_number,
+202:                 evidence_type=r.evidence_type,
+203:                 confidence=r.confidence,
+204:                 normalized_facts=facts,
+205:                 related_entity=r.related_entity,
+206:                 related_skill=r.related_skill,
+207:                 related_project=r.related_project,
+208:                 related_experience=r.related_experience,
+209:                 related_technologies=techs,
+210:             )
+211:         )
+212: 
+213:     # Reconstruct indices
+214:     section_idx: Dict[str, List[str]] = {}
+215:     tech_idx: Dict[str, List[str]] = {}
+216:     type_idx: Dict[str, List[str]] = {}
+217:     skill_idx: Dict[str, List[str]] = {}
+218:     project_idx: Dict[str, List[str]] = {}
+219:     experience_idx: Dict[str, List[str]] = {}
+220: 
+221:     for item in items:
+222:         ev_id = item.evidence_id
+223:         if item.source_section:
+224:             section_idx.setdefault(item.source_section.lower(), []).append(ev_id)
+225:         type_idx.setdefault(item.evidence_type.upper(), []).append(ev_id)
+226:         for t in item.related_technologies:
+227:             tech_idx.setdefault(t.lower(), []).append(ev_id)
+228:         if item.related_skill:
+229:             skill_idx.setdefault(item.related_skill.lower(), []).append(ev_id)
+230:         if item.related_project:
+231:             project_idx.setdefault(item.related_project.lower(), []).append(ev_id)
+232:         if item.related_experience:
+233:             experience_idx.setdefault(item.related_experience.lower(), []).append(ev_id)
+234: 
+235:     vault = EvidenceVault(
+236:         vault_id=f"vault_{candidate_id}",
+237:         candidate_id=candidate_id,
+238:         total_items=len(items),
+239:         items=items,
+240:         section_index=section_idx,
+241:         technology_index=tech_idx,
+242:         type_index=type_idx,
+243:         skill_index=skill_idx,
+244:         project_index=project_idx,
+245:         experience_index=experience_idx
+246:     )
+247:     _in_memory_vaults[candidate_id] = vault
+248:     return vault
+249: 
+250: def _get_or_load_twin(candidate_id: str, db: Session) -> Optional[CareerTwin]:
+251:     twin = _in_memory_twins.get(candidate_id)
+252:     if twin:
+253:         return twin
+254:     repo = Repository(db)
+255:     rec = repo.get_candidate_profile(candidate_id)
+256:     if not rec:
+257:         return None
+258:     twin_data = json.loads(rec.profile_json)
+259:     twin = CareerTwin(**twin_data)
+260:     _in_memory_twins[candidate_id] = twin
+261:     return twin
+262: 
+263: def _get_or_load_version(version_id: str, db: Session) -> Optional[ResumeVersion]:
+264:     if version_id in _in_memory_versions:
+265:         return _in_memory_versions[version_id]
+266:     repo = Repository(db)
+267:     rec = repo.get_resume_version(version_id)
+268:     if not rec:
+269:         return None
+270:     sections = [ResumeSection(**s) for s in json.loads(rec.sections_json)]
+271:     suggestions = [AcceptedSuggestion(**s) for s in json.loads(rec.accepted_suggestions_json)]
+272:     evidence_ids = json.loads(rec.evidence_ids_json)
+273:     ver = ResumeVersion(
+274:         version_id=rec.version_id,
+275:         candidate_id=rec.candidate_id,
+276:         parent_version_id=rec.parent_version_id,
+277:         created_at=rec.created_at.isoformat() if rec.created_at else "",
+278:         updated_at=rec.updated_at.isoformat() if rec.updated_at else "",
+279:         title=rec.title,
+280:         target_role=rec.target_role,
+281:         source_resume_version=rec.source_resume_version,
+282:         sections=sections,
+283:         accepted_suggestions=suggestions,
+284:         evidence_ids=evidence_ids,
+285:         status=ResumeVersionStatus(rec.status),
+286:         raw_text=rec.raw_text
+287:     )
+288:     _in_memory_versions[version_id] = ver
+289:     return ver
+290: 
+291: def _persist_version(version: ResumeVersion, db: Session):
+292:     _in_memory_versions[version.version_id] = version
+293:     repo = Repository(db)
+294:     repo.save_resume_version(
+295:         version_id=version.version_id,
+296:         candidate_id=version.candidate_id,
+297:         title=version.title,
+298:         sections_dict=[s.model_dump() for s in version.sections],
+299:         parent_version_id=version.parent_version_id,
+300:         target_role=version.target_role,
+301:         status=version.status.value if hasattr(version.status, "value") else str(version.status),
+302:         source_resume_version=version.source_resume_version,
+303:         accepted_suggestions_dict=[s.model_dump() for s in version.accepted_suggestions],
+304:         evidence_ids=version.evidence_ids,
+305:         raw_text=version.raw_text
+306:     )
+307: 
+308: def _get_or_load_target(target_id: str, db: Session) -> Optional[CareerTarget]:
+309:     if target_id in _in_memory_targets:
+310:         return _in_memory_targets[target_id]
+311:     repo = Repository(db)
+312:     rec = repo.get_career_target(target_id)
+313:     if not rec:
+314:         return None
+315:     reqs = json.loads(rec.requirements_json) if rec.requirements_json else []
+316:     target = CareerTarget(
+317:         target_id=rec.target_id,
+318:         candidate_id=rec.candidate_id,
+319:         target_role=rec.target_role,
+320:         target_company=rec.target_company,
+321:         source_job_fit_id=rec.source_job_fit_id,
+322:         status=TargetStatus(rec.status),
+323:         raw_jd_text=rec.raw_jd_text,
+324:         requirements=reqs,
+325:         created_at=rec.created_at,
+326:         updated_at=rec.updated_at
+327:     )
+328:     _in_memory_targets[target_id] = target
+329:     return target
+330: 
+331: def _persist_target(target: CareerTarget, db: Session):
+332:     _in_memory_targets[target.target_id] = target
+333:     repo = Repository(db)
+334:     repo.save_career_target(
+335:         target_id=target.target_id,
+336:         candidate_id=target.candidate_id,
+337:         target_role=target.target_role,
+338:         target_company=target.target_company,
+339:         source_job_fit_id=target.source_job_fit_id,
+340:         status=target.status.value,
+341:         raw_jd_text=target.raw_jd_text,
+342:         requirements=target.requirements
+343:     )
+344: 
+345: def _get_or_load_interview_target(interview_target_id: str, db: Session) -> Optional[InterviewTarget]:
+346:     if interview_target_id in _in_memory_interview_targets:
+347:         return _in_memory_interview_targets[interview_target_id]
+348:     repo = Repository(db)
+349:     rec = repo.get_interview_target(interview_target_id)
+350:     if not rec:
+351:         return None
+352:     it = InterviewTarget(
+353:         interview_target_id=rec.interview_target_id,
+354:         candidate_id=rec.candidate_id,
+355:         target_id=rec.target_id,
+356:         target_role=rec.target_role,
+357:         company=rec.company,
+358:         job_fit_id=rec.job_fit_id,
+359:         status=InterviewTargetStatus(rec.status),
+360:         created_at=rec.created_at,
+361:         updated_at=rec.updated_at
+362:     )
+363:     _in_memory_interview_targets[interview_target_id] = it
+364:     return it
+365: 
+366: def _persist_interview_target(target: InterviewTarget, db: Session):
+367:     _in_memory_interview_targets[target.interview_target_id] = target
+368:     repo = Repository(db)
+369:     repo.save_interview_target(
+370:         interview_target_id=target.interview_target_id,
+371:         candidate_id=target.candidate_id,
+372:         target_role=target.target_role,
+373:         target_id=target.target_id,
+374:         company=target.company,
+375:         job_fit_id=target.job_fit_id,
+376:         status=target.status.value
+377:     )
+378: 
+379: @router.get("/health", summary="Coach Service Health Check")
+380: def coach_health():
+381:     return {"status": "ok", "service": "Vettora AI Career Coach Layer"}
+382: 
+383: @router.post(
+384:     "/resume",
+385:     response_model=ResumeUploadResponse,
+386:     status_code=status.HTTP_200_OK,
+387:     summary="Ingest single resume into Career Twin and Evidence Vault",
+388:     description="Parses candidate resume PDF, creates Career Twin and Evidence Vault, runs ATS readability check, and persists profile."
+389: )
+390: async def upload_resume(
+391:     resume_file: UploadFile = File(..., description="Candidate Resume PDF"),
+392:     db: Session = Depends(get_db)
+393: ) -> ResumeUploadResponse:
+394:     if not resume_file or not resume_file.filename:
+395:         raise HTTPException(status_code=400, detail="A resume PDF file is required.")
+396: 
+397:     if not resume_file.filename.lower().endswith(".pdf"):
+398:         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+399: 
+400:     temp_dir = tempfile.mkdtemp(prefix="vettora_coach_")
+401:     try:
+402:         safe_name = Path(resume_file.filename).name
+403:         temp_path = Path(temp_dir) / safe_name
+404:         content = await resume_file.read()
+405:         if len(content) == 0:
+406:             raise HTTPException(status_code=400, detail="Uploaded PDF is empty (0 bytes).")
+407:         with open(temp_path, "wb") as f_out:
+408:             f_out.write(content)
+409: 
+410:         # 1. Parse document into GenericDocument
+411:         try:
+412:             doc = _parser.parse_pdf(temp_path)
+413:         except DocumentProcessingError as exc:
+414:             raise HTTPException(status_code=400, detail=f"Document parsing error: {exc.message}")
+415: 
+416:         # 2. Extract CandidateProfile
+417:         profile = _resume_analyzer.analyze(doc)
+418:         cid = profile.candidate_id
+419: 
+420:         # 3. Build Evidence Vault
+421:         vault = _vault_service.build_vault(profile)
+422: 
+423:         # 4. Build Career Twin
+424:         twin = _twin_service.build_twin(profile, vault)
+425: 
+426:         # 5. Run Baseline ATS Readability Check
+427:         ats_audit = _ats_service.audit_resume(doc, profile)
+428: 
+429:         # Cache in-memory
+430:         _in_memory_profiles[cid] = profile
+431:         _in_memory_twins[cid] = twin
+432:         _in_memory_vaults[cid] = vault
+433: 
+434:         # Persist to local SQLite
+435:         try:
+436:             repo = Repository(db)
+437:             repo.save_candidate_profile(
+438:                 candidate_id=cid,
+439:                 name=twin.name,
+440:                 email=twin.email,
+441:                 phone=twin.phone,
+442:                 summary=twin.summary,
+443:                 profile_dict=twin.model_dump()
+444:             )
+445:             repo.save_resume(
+446:                 candidate_id=cid,
+447:                 filename=resume_file.filename,
+448:                 page_count=doc.page_count,
+449:                 file_size_bytes=len(content),
+450:                 raw_text=doc.raw_text
+451:             )
+452:             repo.save_evidence_batch(
+453:                 candidate_id=cid,
+454:                 items=[item.model_dump() for item in vault.items]
+455:             )
+456: 
+457:             # Phase 5: Initialize immutable baseline ResumeVersion
+458:             initial_ver = _resume_builder_service.create_initial_version_from_twin(twin, vault)
+459:             _persist_version(initial_ver, db)
+460:         except Exception as db_exc:
+461:             # Non-blocking logging if DB operation encounters transient lock
+462:             pass
+463: 
+464:         summary = (
+465:             f"Successfully ingested resume for {twin.name or 'Candidate'}. "
+466:             f"Extracted {len(twin.skills)} skills, {len(twin.experience)} experience entries, "
+467:             f"and indexed {vault.total_items} verifiable facts in the Evidence Vault."
+468:         )
+469: 
+470:         return ResumeUploadResponse(
+471:             candidate_id=cid,
+472:             filename=resume_file.filename,
+473:             career_twin=twin,
+474:             evidence_vault=vault,
+475:             evidence_summary=twin.evidence_summary,
+476:             ats_quick_score=ats_audit["ats_readability_score"],
+477:             summary=summary
+478:         )
+479: 
+480:     finally:
+481:         if os.path.exists(temp_dir):
+482:             shutil.rmtree(temp_dir, ignore_errors=True)
+483: 
+484: @router.post(
+485:     "/job-fit",
+486:     response_model=JobFitAnalysisResponse,
+487:     status_code=status.HTTP_200_OK,
+488:     summary="Evaluate Job Fit and Gaps for a Candidate",
+489:     description="Compares the candidate's Career Twin against a target Job Description PDF or text, returning gap analysis, required vs preferred alignment, and JD bias warnings."
+490: )
+491: async def evaluate_job_fit(
+492:     candidate_id: str = Form(..., description="ID of the previously uploaded candidate"),
+493:     jd_file: Optional[UploadFile] = File(None, description="Optional target Job Description PDF"),
+494:     jd_text: Optional[str] = Form(None, description="Optional target Job Description text (if PDF not provided)"),
+495:     db: Session = Depends(get_db)
+496: ) -> JobFitAnalysisResponse:
+497:     # 1. Retrieve profile from in-memory cache or DB
+498:     profile = _in_memory_profiles.get(candidate_id)
+499:     if not profile:
+500:         repo = Repository(db)
+501:         record = repo.get_candidate_profile(candidate_id)
+502:         if not record:
+503:             raise HTTPException(
+504:                 status_code=404,
+505:                 detail=f"Candidate profile '{candidate_id}' not found. Please upload a resume first."
+506:             )
+507:         # Parse profile from stored json
+508:         p_dict = json.loads(record.profile_json)
+509:         profile = CandidateProfile(**p_dict.get("candidate_profile", p_dict))
+510: 
+511:     # 2. Parse Job Description
+512:     if not jd_file and not jd_text:
+513:         raise HTTPException(
+514:             status_code=400,
+515:             detail="Either a Job Description PDF (jd_file) or raw text (jd_text) must be provided."
+516:         )
+517: 
+518:     temp_dir = tempfile.mkdtemp(prefix="vettora_fit_")
+519:     try:
+520:         raw_text = ""
+521:         if jd_file and jd_file.filename:
+522:             safe_jd_name = Path(jd_file.filename).name
+523:             temp_path = Path(temp_dir) / safe_jd_name
+524:             content = await jd_file.read()
+525:             with open(temp_path, "wb") as f_out:
+526:                 f_out.write(content)
+527:             jd_doc = _parser.parse_pdf(temp_path)
+528:             jd = _jd_analyzer.analyze(jd_doc)
+529:             raw_text = jd_doc.raw_text
+530:         else:
+531:             # Construct GenericDocument from text
+532:             from app.schemas.document import GenericDocument, DocumentPage
+533:             norm_text = jd_text.strip()
+534:             page = DocumentPage(page_number=1, raw_text=norm_text, normalized_text=norm_text, blocks=[])
+535:             generic_doc = GenericDocument(
+536:                 document_id=f"jd_{uuid.uuid4().hex[:8]}",
+537:                 filename="job_description.txt",
+538:                 raw_text=norm_text,
+539:                 normalized_text=norm_text,
+540:                 page_count=1,
+541:                 pages=[page]
+542:             )
+543:             jd = _jd_analyzer.analyze(generic_doc)
+544:             raw_text = norm_text
+545: 
+546:         # 3. Evaluate Fit using persisted Twin & Vault
+547:         twin = _in_memory_twins.get(candidate_id)
+548:         vault = _get_or_load_vault(candidate_id, db)
+549:         fit_response = _job_fit_service.evaluate_fit(
+550:             profile=profile,
+551:             jd=jd,
+552:             twin=twin,
+553:             vault=vault,
+554:             raw_jd_text=raw_text
+555:         )
+556: 
+557:         # Optionally persist target JD
+558:         try:
+559:             repo = Repository(db)
+560:             repo.save_job_target(
+561:                 job_id=jd.jd_id,
+562:                 title=jd.title or "Target Job",
+563:                 raw_text=raw_text,
+564:                 requirements_dict=[r.model_dump() for r in jd.requirements],
+565:                 bias_audit_dict=fit_response.bias_audit.model_dump() if fit_response.bias_audit else None
+566:             )
+567:         except Exception:
+568:             pass
+569: 
+570:         return fit_response
+571: 
+572:     finally:
+573:         if os.path.exists(temp_dir):
+574:             shutil.rmtree(temp_dir, ignore_errors=True)
+575: 
+576: @router.post(
+577:     "/career-twin",
+578:     response_model=CareerTwinQueryResponse,
+579:     status_code=status.HTTP_200_OK,
+580:     summary="Query Career Twin by Candidate ID"
+581: )
+582: def get_career_twin(
+583:     payload: CareerTwinQueryRequest,
+584:     db: Session = Depends(get_db)
+585: ) -> CareerTwinQueryResponse:
+586:     cid = payload.candidate_id
+587:     twin = _in_memory_twins.get(cid)
+588:     vault = _get_or_load_vault(cid, db)
+589: 
+590:     if not twin:
+591:         repo = Repository(db)
+592:         record = repo.get_candidate_profile(cid)
+593:         if not record:
+594:             raise HTTPException(status_code=404, detail=f"Career Twin '{cid}' not found.")
+595:         twin_data = json.loads(record.profile_json)
+596:         twin = CareerTwin(**twin_data)
+597: 
+598:     evidence_summary = twin.evidence_summary or (vault.summary.by_type if vault and vault.summary else {})
+599: 
+600:     return CareerTwinQueryResponse(
+601:         career_twin=twin,
+602:         evidence_vault=vault,
+603:         evidence_summary=evidence_summary
+604:     )
+605: 
+606: @router.get(
+607:     "/evidence/{candidate_id}",
+608:     response_model=EvidenceQueryResponse,
+609:     status_code=status.HTTP_200_OK,
+610:     summary="Query and filter candidate Evidence Vault",
+611:     description="Retrieve verified candidate evidence items with optional filters by section, type, skill, project, or experience."
+612: )
+613: def get_candidate_evidence(
+614:     candidate_id: str,
+615:     section: Optional[str] = Query(None, description="Filter by section name"),
+616:     type: Optional[str] = Query(None, description="Filter by evidence type (SKILL, EXPERIENCE, etc.)"),
+617:     skill: Optional[str] = Query(None, description="Filter by skill or technology"),
+618:     project: Optional[str] = Query(None, description="Filter by project"),
+619:     experience: Optional[str] = Query(None, description="Filter by role or organization"),
+620:     db: Session = Depends(get_db)
+621: ) -> EvidenceQueryResponse:
+622:     vault = _get_or_load_vault(candidate_id, db)
+623:     if not vault:
+624:         raise HTTPException(
+625:             status_code=404,
+626:             detail=f"Evidence Vault for candidate '{candidate_id}' not found."
+627:         )
+628: 
+629:     # Use unified vault filter
+630:     filtered_items = _vault_service.filter_evidence(
+631:         vault=vault,
+632:         section=section,
+633:         evidence_type=type,
+634:         skill=skill,
+635:         project=project,
+636:         experience=experience
+637:     )
+638: 
+639:     filters_applied = {}
+640:     if section:
+641:         filters_applied["section"] = section
+642:     if type:
+643:         filters_applied["type"] = type
+644:     if skill:
+645:         filters_applied["skill"] = skill
+646:     if project:
+647:         filters_applied["project"] = project
+648:     if experience:
+649:         filters_applied["experience"] = experience
+650: 
+651:     return EvidenceQueryResponse(
+652:         candidate_id=candidate_id,
+653:         total=len(filtered_items),
+654:         filters_applied=filters_applied,
+655:         evidence=filtered_items
+656:     )
+657: 
+658: @router.post(
+659:     "/evidence/validate",
+660:     response_model=ClaimValidationResult,
+661:     status_code=status.HTTP_200_OK,
+662:     summary="Validate candidate claim against Evidence Vault",
+663:     description="Validates whether a factual claim is grounded in the candidate's verified Evidence Vault."
+664: )
+665: def validate_candidate_claim(
+666:     payload: ClaimValidationRequest,
+667:     db: Session = Depends(get_db)
+668: ) -> ClaimValidationResult:
+669:     vault = _get_or_load_vault(payload.candidate_id, db)
+670:     if not vault:
+671:         raise HTTPException(
+672:             status_code=404,
+673:             detail=f"Evidence Vault for candidate '{payload.candidate_id}' not found."
+674:         )
+675: 
+676:     return _validation_service.validate_claim(vault, payload.claim)
+677: 
+678: @router.post(
+679:     "/resume-coach",
+680:     response_model=ResumeCoachResponse,
+681:     status_code=status.HTTP_200_OK,
+682:     summary="Generate Evidence-Locked Resume Rewrite",
+683:     description="Improves resume wording anchored strictly to verified Evidence Vault facts. Rejects ungrounded claims."
+684: )
+685: def generate_resume_rewrite(
+686:     payload: ResumeCoachRequest,
+687:     db: Session = Depends(get_db)
+688: ) -> ResumeCoachResponse:
+689:     cid = payload.candidate_id
+690:     if not cid:
+691:         raise HTTPException(status_code=400, detail="Candidate ID is required.")
+692: 
+693:     twin = _in_memory_twins.get(cid)
+694:     if not twin:
+695:         repo = Repository(db)
+696:         record = repo.get_candidate_profile(cid)
+697:         if not record:
+698:             raise HTTPException(
+699:                 status_code=404,
+700:                 detail=f"Candidate profile '{cid}' not found. Please upload a resume first."
+701:             )
+702:         twin_data = json.loads(record.profile_json)
+703:         twin = CareerTwin(**twin_data)
+704: 
+705:     vault = _get_or_load_vault(cid, db)
+706:     if not vault:
+707:         raise HTTPException(
+708:             status_code=404,
+709:             detail=f"Evidence Vault for candidate '{cid}' not found."
+710:         )
+711: 
+712:     return _resume_coach_service.generate_rewrite(
+713:         request=payload,
+714:         twin=twin,
+715:         vault=vault,
+716:         original_resume_text=payload.current_resume_text
+717:     )
+718: 
+719: # ============================================================
+720: # PHASE 5: RESUME VERSIONING & BUILDER ENDPOINTS
+721: # ============================================================
+722: 
+723: @router.post(
+724:     "/resume-versions",
+725:     response_model=ResumeVersion,
+726:     status_code=status.HTTP_201_CREATED,
+727:     summary="Create or Initialize Resume Version",
+728:     description="Creates a new targeted resume version or initializes the baseline version from Career Twin."
+729: )
+730: def create_resume_version(
+731:     payload: CreateVersionRequest,
+732:     db: Session = Depends(get_db)
+733: ) -> ResumeVersion:
+734:     cid = payload.candidate_id
+735:     if not cid:
+736:         raise HTTPException(status_code=400, detail="Candidate ID is required.")
+737: 
+738:     twin = _get_or_load_twin(cid, db)
+739:     if not twin:
+740:         raise HTTPException(status_code=404, detail=f"Candidate profile '{cid}' not found. Please upload a resume first.")
+741: 
+742:     vault = _get_or_load_vault(cid, db)
+743:     if not vault:
+744:         raise HTTPException(status_code=404, detail=f"Evidence Vault for candidate '{cid}' not found.")
+745: 
+746:     if payload.parent_version_id:
+747:         parent_ver = _get_or_load_version(payload.parent_version_id, db)
+748:         if not parent_ver:
+749:             raise HTTPException(status_code=404, detail=f"Parent version '{payload.parent_version_id}' not found.")
+750:         new_ver = _resume_builder_service.create_targeted_draft(
+751:             base_version=parent_ver,
+752:             title=payload.title,
+753:             target_role=payload.target_role
+754:         )
+755:     else:
+756:         new_ver = _resume_builder_service.create_initial_version_from_twin(
+757:             twin=twin,
+758:             vault=vault,
+759:             title=payload.title,
+760:             target_role=payload.target_role
+761:         )
+762: 
+763:     _persist_version(new_ver, db)
+764:     return new_ver
+765: 
+766: @router.get(
+767:     "/resume-versions/{candidate_id}",
+768:     response_model=List[ResumeVersionSummary],
+769:     status_code=status.HTTP_200_OK,
+770:     summary="List Resume Versions for Candidate",
+771:     description="Lists all historical and draft resume versions for a candidate with provenance metadata."
+772: )
+773: def list_resume_versions(
+774:     candidate_id: str,
+775:     db: Session = Depends(get_db)
+776: ) -> List[ResumeVersionSummary]:
+777:     repo = Repository(db)
+778:     records = repo.get_resume_versions_for_candidate(candidate_id)
+779: 
+780:     summaries: List[ResumeVersionSummary] = []
+781:     if records:
+782:         for r in records:
+783:             sugs = json.loads(r.accepted_suggestions_json) if r.accepted_suggestions_json else []
+784:             evs = json.loads(r.evidence_ids_json) if r.evidence_ids_json else []
+785:             summaries.append(
+786:                 ResumeVersionSummary(
+787:                     version_id=r.version_id,
+788:                     candidate_id=r.candidate_id,
+789:                     parent_version_id=r.parent_version_id,
+790:                     created_at=r.created_at.isoformat() if r.created_at else "",
+791:                     updated_at=r.updated_at.isoformat() if r.updated_at else "",
+792:                     title=r.title,
+793:                     target_role=r.target_role,
+794:                     status=ResumeVersionStatus(r.status),
+795:                     accepted_changes_count=len(sugs),
+796:                     evidence_ids_count=len(evs),
+797:                     evidence_backed=True
+798:                 )
+799:             )
+800:     else:
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

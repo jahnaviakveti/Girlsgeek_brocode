@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -14,6 +14,9 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
+    AIPIPE_TOKEN: Optional[str] = None
+    AIPIPE_MODEL: str = "openai/gpt-4.1-nano"
+
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 

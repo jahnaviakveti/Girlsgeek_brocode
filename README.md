@@ -4,22 +4,22 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![React 19](https://img.shields.io/badge/Frontend-React_19_Vite-61DAFB.svg)](https://react.dev/)
-[![Tests](https://img.shields.io/badge/Pytest-159%2F159_Passed-brightgreen.svg)](https://pytest.org/)
+[![Tests](https://img.shields.io/badge/Pytest-397%2F397_Passed-brightgreen.svg)](https://pytest.org/)
 [![Embeddings](https://img.shields.io/badge/Embeddings-all--MiniLM--L6--v2-orange.svg)](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
 ---
 
-## 🎬 Live Demo & Video Walkthrough
-
-![Vettora UI Walkthrough Preview](./assets/demo_preview.gif)
-
-
----
-
 ## 📌 Executive Summary
 
-**Vettora** (developed by Team Brocode for the Nexora Hackathon) is an enterprise-grade AI candidate vetting and vectorized shortlisting platform designed to replace opaque keyword-based applicant tracking systems (ATS). By combining **semantic vector embeddings**, **hybrid multi-factor scoring (1–25 candidates)**, **automated explainability**, **ranking robustness auditing**, and **proactive job description inclusivity/bias detection**, Vettora provides recruiters with transparent, calibrated, and equitable shortlisting recommendations in seconds.
+**Vettora** is a production-grade, evidence-grounded career intelligence and candidate vetting platform. Built across 9 meticulous phases, Vettora transforms career coaching from speculative keyword manipulation into a verifiable, deterministic science. 
+
+Candidates start with their actual resume, build an immutable **Evidence Vault** and **Career Twin**, evaluate realistic **Job Fit** against market requirements, bridge gaps through **Career Intelligence** and **Career Execution**, prepare with **Interview Readiness**, and publish an honest, shareable **Career Showcase** containing exclusively verified accomplishments with claim scope preservation (Levels 1–5).
+
+### The Complete End-to-End Pipeline
+```
+RESUME → EVIDENCE VAULT → CAREER TWIN → JOB FIT → RESUME COACH → RESUME BUILDER → CAREER INTELLIGENCE → INTERVIEW READINESS → CAREER EXECUTION → CAREER SHOWCASE
+```
 
 ---
 
@@ -188,7 +188,7 @@ npm run dev
 
 ### 3. Run Automated Tests
 
-To execute the entire 159-test test suite:
+To execute the entire 397-test suite spanning all 9 phases:
 
 ```bash
 cd backend
@@ -198,7 +198,7 @@ pytest
 
 **Output**:
 ```text
-======================== 159 passed in 48.72s ========================
+======================== 397 passed in 20.42s ========================
 ```
 
 ---

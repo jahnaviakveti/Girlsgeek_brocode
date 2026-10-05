@@ -1,0 +1,74 @@
+Created At: 2026-10-04T17:06:53+05:30
+Completed At: 2026-10-04T17:06:53+05:30
+File Path: `file:///Users/jahnaviakveti/Downloads/Vettora-main/backend/app/api/routes/coach.py`
+Total Lines: 2107
+Total Bytes: 77770
+Showing lines 1810 to 1875
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1810:     db: Session = Depends(get_db)
+1811: ) -> CareerExecution:
+1812:     try:
+1813:         return _career_execution_service.submit_artifact(
+1814:             candidate_id=payload.candidate_id,
+1815:             execution_id=execution_id,
+1816:             name=payload.name,
+1817:             artifact_type=payload.artifact_type,
+1818:             url_or_path=payload.url_or_path,
+1819:             description=payload.description,
+1820:             technologies=payload.technologies,
+1821:             db=db,
+1822:         )
+1823:     except PermissionError as exc:
+1824:         raise HTTPException(status_code=403, detail=str(exc))
+1825:     except ValueError as exc:
+1826:         raise HTTPException(status_code=400, detail=str(exc))
+1827: 
+1828: 
+1829: @router.post(
+1830:     "/career-executions/{execution_id}/complete",
+1831:     response_model=CareerExecution,
+1832:     summary="Complete Career Execution (Self-Reported)",
+1833:     description="Marks execution as SELF_REPORTED_COMPLETE. Does NOT alter Evidence Vault or Twin."
+1834: )
+1835: def complete_career_execution_self_reported(
+1836:     execution_id: str,
+1837:     payload: CompleteExecutionRequest,
+1838:     db: Session = Depends(get_db)
+1839: ) -> CareerExecution:
+1840:     try:
+1841:         return _career_execution_service.complete_self_reported(
+1842:             candidate_id=payload.candidate_id,
+1843:             execution_id=execution_id,
+1844:             notes=payload.notes,
+1845:             db=db,
+1846:         )
+1847:     except PermissionError as exc:
+1848:         raise HTTPException(status_code=403, detail=str(exc))
+1849:     except ValueError as exc:
+1850:         raise HTTPException(status_code=400, detail=str(exc))
+1851: 
+1852: 
+1853: @router.post(
+1854:     "/career-executions/{execution_id}/block",
+1855:     response_model=CareerExecution,
+1856:     summary="Report Execution Blocker",
+1857:     description="Flags execution as BLOCKED with reason and next steps."
+1858: )
+1859: def block_career_execution(
+1860:     execution_id: str,
+1861:     payload: BlockExecutionRequest,
+1862:     db: Session = Depends(get_db)
+1863: ) -> CareerExecution:
+1864:     try:
+1865:         return _career_execution_service.report_blocker(
+1866:             candidate_id=payload.candidate_id,
+1867:             execution_id=execution_id,
+1868:             blocker_reason=payload.blocker_reason,
+1869:             next_step=payload.next_step,
+1870:             db=db,
+1871:         )
+1872:     except PermissionError as exc:
+1873:         raise HTTPException(status_code=403, detail=str(exc))
+1874:     except ValueError as exc:
+1875:         raise HTTPException(status_code=400, detail=str(exc))
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

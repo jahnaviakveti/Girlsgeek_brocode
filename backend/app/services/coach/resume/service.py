@@ -223,6 +223,30 @@ class ResumeCoachService:
 
         suggested_text = raw_generated.strip().strip('"\'')
 
+        import string
+        def _normalize(text: str) -> str:
+            if not text:
+                return ""
+            return text.translate(str.maketrans('', '', string.whitespace)).lower()
+
+        if _normalize(original_text) == _normalize(suggested_text):
+            return ResumeCoachResponse(
+                suggestion_id=suggestion_id,
+                candidate_id=request.candidate_id,
+                requirement_id=request.requirement_id,
+                status=ResumeCoachStatus.NO_SAFE_REWRITE,
+                original_text=original_text,
+                suggested_text=None,
+                changes=[],
+                evidence_used=[],
+                unsupported_claims=[],
+                validation=[],
+                explanation="AI suggestion generated identical or negligibly different text. No meaningful rewrite produced.",
+                can_rewrite=True,
+                created_at=now_iso
+            )
+
+
         # ----------------------------------------------------
         # 4. Claim-Level Validation Pipeline
         # Break suggested text into individual factual claims
